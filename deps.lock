@@ -1,0 +1,12 @@
+# Arcade-GingaNin_MiSTer -- vendored dependency lock file.
+# Every third-party file in rtl/third_party/ and sys/ comes from one of these
+# pins; docs/provenance.md says which file came from where.
+Template_MiSTer (sys/, via Arcade-JalecoMS1Z_MiSTer)   c422cb120bf98772f08ba0750fc5df007b904ba6
+Arcade-NMKBP964_MiSTer (savestate, video_retime)       ef05405930d7f07bf32fc0ea481e6880927db173
+MiSTer-devel/ZX-Spectrum_MISTer  rtl/ym2149.sv          d41751d0afc8abf75f31ff1094bf9731e7a1695c
+MiSTer-devel/MSX_MiSTer          rtl/SOUND/psg/ym2149.sv bb1301693478dc2b4fe1ab5f9528f446a1a8816c
+MiSTer-devel/Arcade-TimePilot84_MiSTer  mc6809is.v      9b32de7a750d556b1e9b1df927c27e0c0fb9ec28
+cavnex/mc6809 (upstream, LICENSE.md)                   17e94a6ef163be8b79a9b15b2e814847b6062f0f
+jotego/jtopl  hdl/                                      7ac0c819ad274e208206f2acccbbde80aa06ed1a
+jotego/jt12   hdl/adpcm/jt10_adpcmb*, drvB, div         dc9be7c1ff75d5b9a7f9d89da1b7fba212af1257
+MAME (reference only)                                   017b8670f0ad3be2f64911bf587eb137e53f08bd
