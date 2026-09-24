@@ -54,3 +54,6 @@ sim/rtl/*/*.bin
 __pycache__/
 .DS_Store
 *.swp
+
+# the ymfm oracle binary (built from ~/mame/3rdparty/ymfm)
+sim/oracle/ymfm_y8950/ymfm_y8950

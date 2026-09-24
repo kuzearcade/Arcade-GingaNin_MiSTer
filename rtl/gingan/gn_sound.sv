@@ -25,15 +25,15 @@ module gn_sound (
 	// the latch from the main CPU (vregs[7])
 	input             cmd_we,
 	input      [7:0]  cmd,
-	// the sound chips' write buses (the chips are instantiated by the caller
-	// in the reference harness; gn_sound_chips wires them for the board)
-	output            ce_q4,        // 3.579545 MHz
-	output            ce_psg,       // 1.789773 MHz
-	output reg        opl_wr,       // one clock
-	output reg        opl_a0,
-	output reg        psg_wr,
-	output reg        psg_a0,
-	output reg [7:0]  wdata,
+	// the Y8950's ADPCM ROM (byte address in the 128 KB region), held request
+	output            adpcm_req,
+	output     [23:0] adpcm_addr,
+	input             adpcm_ack,
+	input      [7:0]  adpcm_data,
+	// audio: MAME's mix (Y8950 at 1.0, each YM2149 channel at 0.10)
+	output reg signed [15:0] snd,
+	output signed [15:0] dbg_opl,    // the Y8950 alone (after its DAC round trip)
+	output     [12:0] dbg_psg,       // the YM2149 alone, in WAV units (0-4875)
 	// debug
 	output     [15:0] dbg_pc_addr,
 	output reg [31:0] dbg_nmi,
@@ -54,8 +54,8 @@ module gn_sound (
 	reg  [1:0]  ph = 2'd0;
 	reg         fallE, fallQ, eph, ce_e;
 	reg         psg_div = 1'b0;
-	assign ce_q4  = q4;
-	assign ce_psg = q4 & psg_div;
+	wire        ce_q4  = q4;
+	wire        ce_psg = q4 & psg_div;
 	always @(posedge clk) begin
 		// free-running, reset included: mc6809is samples nRESET on falling E, so
 		// E must keep running while reset is held (the first harness run held
@@ -138,11 +138,63 @@ module gn_sound (
 	end
 
 	// chip writes: one clock at falling E
+	reg       opl_wr, opl_a0, psg_wr, psg_a0;
+	reg [7:0] wdata;
 	always @(posedge clk) begin
 		opl_wr <= 1'b0; psg_wr <= 1'b0;
 		if (fallE && !rnw && (sel_opl || sel_psg)) begin
 			opl_wr <= sel_opl; psg_wr <= sel_psg; opl_a0 <= a[0]; psg_a0 <= a[0]; wdata <= cpu_do;
 		end
+	end
+
+	// ---------------------------------------------------------------- YM2149
+	// ZX-Spectrum_MISTer's copy (it matches MAME's period-0 rule, GN-5): BDIR/BC
+	// = 1/1 latches the address, 1/0 writes data; SEL 0 = no /2 (MAME's
+	// default YM2149), MODE 0 = the YM's 5-bit volume table
+	wire [7:0] psg_a, psg_b, psg_c;
+	YM2149 u_psg (
+		.CLK(clk), .CE(ce_psg), .RESET(reset), .BDIR(psg_wr), .BC(psg_wr & ~psg_a0),
+		.DI(wdata), .DO(), .CHANNEL_A(psg_a), .CHANNEL_B(psg_b), .CHANNEL_C(psg_c),
+		.SEL(1'b0), .MODE(1'b0), .ACTIVE(), .IOA_in(8'hFF), .IOA_out(), .IOB_in(8'hFF), .IOB_out());
+
+	// ---------------------------------------------------------------- Y8950
+	wire signed [15:0] opl_snd;
+	gn_y8950 u_opl (
+		.clk(clk), .reset(reset), .cen(ce_q4), .wr(opl_wr), .a0(opl_a0), .din(wdata),
+		.mem_req(adpcm_req), .mem_addr(adpcm_addr), .mem_ack(adpcm_ack), .mem_data(adpcm_data),
+		.snd(opl_snd), .snd_fm(), .snd_adpcm(), .sample());
+	assign dbg_opl = opl_snd;
+
+	// ---------------------------------------------------------------- mix
+	// MAME's YM2149 is a resistor model into a 1 kohm load (ay8910.cpp
+	// build_single_table, ym2149_param, not normalised): a channel outputs
+	// table[volume] (0.4159 at volume 0 up to 0.7125 at 15; a silent phase is
+	// volume 0), routed at 0.10. In WAV units that is table x 3277, with a DC
+	// floor of 1,363 per channel; the board's output is AC-coupled, so the
+	// mixer keeps MAME's AC part, (table[v] - table[0]) x 3277 (GN-5).
+	// The ZX core only exports its own 8-bit level; each fixed volume v has a
+	// unique one ({v, v[3]} into its YM table), and the game never uses the
+	// envelope (GN-3), so the mapping back to v is exact.
+	function [10:0] psg_lvl(input [7:0] c);
+		case (c)
+			8'h00: psg_lvl = 11'd0;   8'h01: psg_lvl = 11'd6;   8'h02: psg_lvl = 11'd11;  8'h03: psg_lvl = 11'd16;
+			8'h06: psg_lvl = 11'd24;  8'h09: psg_lvl = 11'd33;  8'h0C: psg_lvl = 11'd48;  8'h11: psg_lvl = 11'd64;
+			8'h1B: psg_lvl = 11'd93;  8'h25: psg_lvl = 11'd126; 8'h35: psg_lvl = 11'd181; 8'h47: psg_lvl = 11'd244;
+			8'h66: psg_lvl = 11'd355; 8'h88: psg_lvl = 11'd483; 8'hC0: psg_lvl = 11'd710; 8'hFF: psg_lvl = 11'd972;
+			default: psg_lvl = 11'd0;     // envelope levels: unused by this game
+		endcase
+	endfunction
+	// Measured against MAME's YM2149-only WAV over 90 s of play (GN-5), the
+	// table alone is 4.5 dB low in every band; the level is calibrated to
+	// MAME's RMS (x 107/64), as MS1Z-13 calibrated its SSG. The cause is open.
+	wire [12:0] psg_raw = {2'b00, psg_lvl(psg_a)} + {2'b00, psg_lvl(psg_b)} + {2'b00, psg_lvl(psg_c)};
+	wire [19:0] psg_cal = psg_raw * 20'd107;
+	wire [12:0] psg_mix = psg_cal[18:6];
+	assign dbg_psg = psg_mix;
+	always @(posedge clk) begin : mix
+		reg signed [19:0] m;
+		m = {{4{opl_snd[15]}}, opl_snd} + {7'd0, psg_mix};
+		snd <= (m > 32767) ? 16'sd32767 : (m < -32768) ? -16'sd32768 : m[15:0];
 	end
 
 	// read mux: RAM and ROM data are registered from the address, which the

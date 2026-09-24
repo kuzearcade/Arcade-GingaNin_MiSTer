@@ -11,11 +11,9 @@ Where every file came from. Pins are in `deps.lock`.
 | `rtl/video_retime.sv` | Arcade-NMKBP964_MiSTer | verbatim (the parameterised vertical window) |
 | `rtl/savestate/savestate.sv`, `savestate_ui.sv`, `ss_m68k_park.sv` | Arcade-NMKBP964_MiSTer | verbatim (`savestate.sv` has NMKBP964's VARLAT mode) |
 | `rtl/third_party/fx68k`, `hiscore`, `crt_adjust` | Arcade-JalecoMS1Z_MiSTer (its pins) | verbatim |
-| `rtl/third_party/ym2149/ym2149_zx.sv` | MiSTer-devel/ZX-Spectrum_MISTer `rtl/ym2149.sv` | verbatim (module `YM2149`) |
-| `rtl/third_party/ym2149/ym2149_msx.sv` | MiSTer-devel/MSX_MiSTer `rtl/SOUND/psg/ym2149.sv` | verbatim (module `ym2149`); Q5 picks one |
+| `rtl/third_party/ym2149/ym2149_zx.sv` | MiSTer-devel/ZX-Spectrum_MISTer `rtl/ym2149.sv` | modified: the volume table is a `localparam` array instead of an initialised `wire` (Verilator); chosen over MSX_MiSTer's copy by Q5 (GN-5) |
 | `rtl/third_party/mc6809/mc6809is.v` | Arcade-TimePilot84_MiSTer (upstream cavnex/mc6809) | modified: power-up values on the NMI/IRQ/FIRQ latches and samples (GN-4); `LICENSE.md` from upstream (BSD) |
 | `rtl/third_party/jtopl/` | jotego/jtopl `hdl/` | verbatim, GPL-3.0 |
-| `rtl/third_party/jt12_adpcm/` | jotego/jt12 `hdl/adpcm/jt10_adpcmb*.v`, `jt10_adpcm_drvB.v`, `jt10_adpcm_div.v` | verbatim, GPL-3.0 |
 
 ## Tools and simulation
 
@@ -24,4 +22,6 @@ Where every file came from. Pins are in `deps.lock`.
 | `tools/gn_romdata.py`, `gen_gn_mra.py`, `gn_model.py` | new (the generator follows NMKBP964's) | |
 | `sim/oracle/gn_capture.lua`, `gn_play.lua`, `gn_sndtrace.lua` | new | |
 | `tools/gn_sndcmp.py`, `sim/rtl/gn_snd/` | new | the sound-board trace gate (GN-4) |
-| `rtl/gingan/gn_ptm6840.sv`, `gn_sound.sv` | new | |
+| `rtl/gingan/gn_ptm6840.sv`, `gn_sound.sv`, `gn_y8950.sv` | new | |
+| `rtl/gingan/gn_adpcmb.sv` | new: a port of MAME's ymfm `adpcm_b_channel` (Aaron Giles, BSD-3-Clause) | GN-5 |
+| `sim/oracle/ymfm_y8950/` | new; compiles `~/mame/3rdparty/ymfm` in place | the Y8950 oracle |

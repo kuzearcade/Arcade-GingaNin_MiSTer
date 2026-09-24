@@ -135,3 +135,43 @@ preceding timer release, on the RTL's own releases):
   far along), not in their values.
 
 The sound gate from here is at the audio level (M2), as on the siblings.
+
+## GN-6 — M1: the video RTL against MAME's pictures (closed: 4,098 / 4,098)
+
+`sim/rtl/video_state` loads a captured state into `gn_video` through its
+CPU port:
+- VRAMs, sprites and vregs of state F;
+- the palette of state F+1 (GN-2), entries never written left unwritten
+  (GN-1);
+- the text tiles and BG map through the download port.
+
+It renders two frames and compares lines 16-239 with MAME's picture F+1.
+The tile ROM ports answer after 20 clocks with every 5th request stalled 5
+more (MP-9's lesson).
+
+| capture | frames | exact |
+|---|---|---|
+| attract | every frame, 1-1,798 | 1,798 |
+| scripted play | every 3rd, 1-5,398 | 1,800 |
+| Flip Screen DIP | every 3rd, 1-1,498 | 500 |
+
+Zero sprite overruns in all of them. Two bugs were found on the way.
+
+**1. Sprites parked at the top.** Unused sprites sit at Y 0-15, so lines 0-15
+cross dozens of entries. The line engine overran on every such line (26 a
+frame). The overrun that mattered was at vcount 14, which draws line 16,
+the first visible one: its start arrived while line 15 was still being
+drawn, was ignored, and line 16 would have had no sprites.
+- The engines now draw only visible lines (16-239).
+- A start while busy restarts the engine on the new line (counted as an
+  overrun), so a slow line can never swallow the next one.
+
+**2. Negative sprite coordinates.** MAME's `(v & 0xFF) - (v & 0x100)`
+subtracts 256; the first version subtracted 512 (`{v[8], 9'd0}`). Every
+sprite crossing the left or top edge was drawn off screen. Found by the
+sweep: 66 frames with 3-176 differing pixels in runs of four (attract
+441-444, 857-860, ...), all sprites at negative X or Y. This is also the
+checker's negative control: it sees a real, small sprite error.
+
+The board path must also tolerate what the restart does: a ROM request can
+be dropped before its acknowledge (M3).

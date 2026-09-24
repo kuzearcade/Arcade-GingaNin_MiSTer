@@ -2,13 +2,17 @@
 // trace (sim/oracle/gn_sndtrace.lua). The main CPU's latch writes are replayed
 // at MAME's times; every 6809 write to the PTM, the Y8950 and the YM2149 is
 // logged as "t_ns dev W offset data", MAME's format, for tools/gn_sndcmp.py.
-//   ./obj_dir/Vgn_sound SND_BIN MAME_TRACE OUT_TRACE MS
+//   ./obj_dir/Vgn_sound SND_BIN MAME_TRACE OUT_TRACE MS [ADPCM_BIN WAV_OUT]
+// With ADPCM_BIN the Y8950's samples are served (8-clock latency) and the mixed
+// output is written to WAV_OUT as raw int16 mono at 48 kHz, with WAV_OUT.opl (the
+// Y8950 alone) and WAV_OUT.psg (the YM2149 alone, as the mixer adds it).
 #include "Vgn_sound.h"
 #include "verilated.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <vector>
+#include <string>
 int main(int argc, char **argv) {
 	Verilated::commandArgs(argc, argv);
 	if (argc < 5) { fprintf(stderr, "usage: SND_BIN MAME_TRACE OUT_TRACE MS\n"); return 1; }
@@ -33,6 +37,15 @@ int main(int argc, char **argv) {
 	}
 	fclose(f);
 	FILE *out = fopen(argv[3], "w");
+	std::vector<uint8_t> adpcm(0x20000, 0);
+	FILE *wav = nullptr, *wav_opl = nullptr, *wav_psg = nullptr;
+	if (argc > 6) {
+		FILE *a = fopen(argv[5], "rb"); if (!a || fread(adpcm.data(), 1, adpcm.size(), a) != adpcm.size()) return 1; fclose(a);
+		wav = fopen(argv[6], "wb");
+		wav_opl = fopen((std::string(argv[6]) + ".opl").c_str(), "wb");
+		wav_psg = fopen((std::string(argv[6]) + ".psg").c_str(), "wb");
+	}
+	int acnt = -1; uint64_t next_audio = 0;
 	double end_ns = atof(argv[4]) * 1e6;
 	Vgn_sound *t = new Vgn_sound;
 	uint64_t cyc = 0; size_t ci = 0;
@@ -41,7 +54,15 @@ int main(int argc, char **argv) {
 	auto tick = [&]() {
 		t->clk = 0; t->eval();
 		t->rom_data = rom[t->rom_addr];
+		t->adpcm_ack = 0;
+		if (t->adpcm_req) { if (acnt < 0) acnt = 8; else if (acnt > 0 && --acnt == 0) { t->adpcm_data = adpcm[t->adpcm_addr & 0x1FFFF]; t->adpcm_ack = 1; acnt = -2; } }
+		else acnt = -1;
 		t->clk = 1; t->eval(); cyc++;
+		if (wav && cyc >= next_audio) {
+			next_audio += 1000;
+			int16_t v = t->snd, o = t->dbg_opl, p = (int16_t)t->dbg_psg;   // already in WAV units
+			fwrite(&v, 2, 1, wav); fwrite(&o, 2, 1, wav_opl); fwrite(&p, 2, 1, wav_psg);
+		}
 	};
 	for (int i = 0; i < 2000; i++) tick();         // reset over ~37 E cycles
 	t->reset = 0;
@@ -66,6 +87,7 @@ int main(int argc, char **argv) {
 		}
 	}
 	fclose(out);
+	if (wav) { fclose(wav); fclose(wav_opl); fclose(wav_psg); }
 	printf("done: %.1f ms, %zu commands, nmi %u, irq %u, ptm writes %u, latch reads %u\n", end_ns / 1e6, ci, t->dbg_nmi, t->dbg_irq, t->dbg_ptm_writes, t->dbg_latch_reads);
 	delete t;
 	return 0;

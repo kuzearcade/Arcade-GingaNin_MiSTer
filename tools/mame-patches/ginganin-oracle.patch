@@ -1,0 +1,26 @@
+diff --git a/src/mame/jaleco/ginganin.cpp b/src/mame/jaleco/ginganin.cpp
+index 2748e608ecc..4813aa32128 100644
+--- a/src/mame/jaleco/ginganin.cpp
++++ b/src/mame/jaleco/ginganin.cpp
+@@ -58,6 +58,8 @@ f5d6    print 7 digit BCD number: d0.l to (a1)+ color $3000
+ 
+ #include "emu.h"
+ 
++#include <cstdlib>
++
+ #include "cpu/m68000/m68000.h"
+ #include "cpu/m6809/m6809.h"
+ #include "machine/6840ptm.h"
+@@ -522,8 +524,10 @@ void ginganin_state::ginganin(machine_config &config)
+ 
+ 	// sound hardware
+ 	SPEAKER(config, "mono").front_center();
+-	YM2149(config, "psg", SOUND_CLOCK / 2).add_route(ALL_OUTPUTS, "mono", 0.10);
+-	Y8950(config, "ymsnd", SOUND_CLOCK).add_route(ALL_OUTPUTS, "mono", 1.0); // The Y8950 is basically a YM3526 with ADPCM built in
++	// Arcade-GingaNin_MiSTer oracle patch: GN_MUTE_PSG / GN_MUTE_OPL silence one
++	// chip, so each source can be judged alone (SS-10's method)
++	YM2149(config, "psg", SOUND_CLOCK / 2).add_route(ALL_OUTPUTS, "mono", getenv("GN_MUTE_PSG") ? 0.0 : 0.10);
++	Y8950(config, "ymsnd", SOUND_CLOCK).add_route(ALL_OUTPUTS, "mono", getenv("GN_MUTE_OPL") ? 0.0 : 1.0); // The Y8950 is basically a YM3526 with ADPCM built in
+ }
+ 
+ 
