@@ -194,20 +194,20 @@ reg     [15:0] ea_p1;
 // that changes the value of S from the default (which is currently $0) will clear the mask.  A reset will set the mask again.
 reg     NMIMask;
 
-reg     NMILatched;
-reg     NMISample;
-reg     NMISample2;
+reg     NMILatched = 1'b1;   // Arcade-GingaNin_MiSTer: power-up inactive (GN-4)
+reg     NMISample = 1'b1;
+reg     NMISample2 = 1'b1;
 reg     NMIClear;
 reg     NMIClear_nxt;
 wire    wNMIClear = NMIClear;
 
-reg     IRQLatched;
+reg     IRQLatched = 1'b1;
 
-reg     IRQSample;
-reg     IRQSample2;
-reg     FIRQLatched;
-reg     FIRQSample;
-reg     FIRQSample2;
+reg     IRQSample = 1'b1;
+reg     IRQSample2 = 1'b1;
+reg     FIRQLatched = 1'b1;
+reg     FIRQSample = 1'b1;
+reg     FIRQSample2 = 1'b1;
 reg     HALTLatched;
 reg     HALTSample;
 reg     HALTSample2;
