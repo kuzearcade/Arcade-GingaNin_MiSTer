@@ -136,6 +136,41 @@ preceding timer release, on the RTL's own releases):
 
 The sound gate from here is at the audio level (M2), as on the siblings.
 
+## GN-5 — The sound chips and the mix against MAME (closed, measured; one calibration open)
+
+Harnesses:
+- `sim/rtl/gn_y8950` runs `gn_y8950` against ymfm's Y8950 (`sim/oracle/ymfm_y8950`), register write for register write.
+- `sim/rtl/gn_snd` runs the whole sound board from MAME's latch trace (90 s, `GN_WARP=1`). It writes the mix and each chip's own output (`.opl`, `.psg`).
+- MAME's reference WAVs come from the same trace with `tools/mame-patches/ginganin-oracle.patch`, which lets `GN_MUTE_PSG` / `GN_MUTE_OPL` silence one chip's route.
+
+Every comparison removes DC first (100 ms moving average), then compares 10 ms RMS envelopes.
+
+**1. ADPCM-B: bit exact.** `gn_adpcmb.sv` is a port of ymfm's DELTA-T unit. It matches ymfm sample for sample in the `adpcm` mode.
+- One bug was found this way. The interpolation weight `(~position) + 17'd1` widens `position` before the `~`, so the weight was wrong. It is now written as `17'h10000 - {1'b0, position}`.
+
+**2. FM: jtopl, with a small residue.** The Y8950's FM half is jtopl's YM3526, unmodified. Against ymfm, the FM-only modes reach an envelope correlation of about 0.98, at −0.9 dB.
+- The residue is jtopl's envelope and phase arithmetic, not the register traffic, which is identical.
+- It is accepted; the siblings use jtopl as well.
+- One wiring bug: jtopl's `sample` gated with `cen` gave 4× the samples. `gn_y8950` now takes the rising edge of `sample`.
+
+**3. YM2149: ZX-Spectrum_MISTer's copy (D4, Q5).** The ZX module implements MAME's period-0 rule: a tone or noise period of 0 counts as 1 and toggles at the maximum rate. MSX_MiSTer's copy does not, so it was dropped.
+- The volume table became a `localparam` for Verilator.
+
+**4. The PSG mixer: MAME's resistor levels, then ×107/64.**
+- The first mapping put the PSG 6.6 dB above MAME.
+- The next used the AC part of MAME's resistor network (`psg_lvl` in `gn_sound.sv`). It came out 4.5 dB below MAME in every band, which rules out a filter.
+- `gn_sound` therefore scales the three-channel sum by 107/64 (+4.47 dB), calibrated to MAME's RMS. **Where MAME's extra 4.5 dB comes from is still open.** Candidates are the route gains and the resistor network's load.
+
+**5. Result** (90 s of play, calibrated):
+
+| source | envelope correlation | level vs MAME |
+|---|---|---|
+| Y8950 alone | 0.966 | −0.10 dB |
+| YM2149 alone | 0.772 | +0.21 dB |
+| mix | 0.952 | −0.08 dB |
+
+The YM2149's lower correlation has not been broken down. The likely cause is its noise channel: the noise is a free-running LFSR whose phase against MAME's is arbitrary, and the PSG alone is quiet (RMS 232), so noise weighs heavily. This is not measured. The music also drifts 3 E cycles per timer period (GN-4), which the envelope comparison absorbs.
+
 ## GN-6 — M1: the video RTL against MAME's pictures (closed: 4,098 / 4,098)
 
 `sim/rtl/video_state` loads a captured state into `gn_video` through its
@@ -175,3 +210,63 @@ checker's negative control: it sees a real, small sprite error.
 
 The board path must also tolerate what the restart does: a ROM request can
 be dropped before its acknowledge (M3).
+
+## GN-7 — M2: the whole board against MAME's pictures; mid-frame sprite writes tear (open, expected: MP-4)
+
+`sim/rtl/gn_frames` runs `gn_core` from reset: fx68k, the sound board and
+the video, with the ROM ports answering after 12 clocks. Each picture is
+compared with MAME's at the offset where it is uniquely exact (offset 0
+throughout). Over the attract capture, 1,799 frames, **840 of 1,508
+compared frames are exact, with zero sprite overruns and IRQ1 on every
+frame.**
+
+**1. The game rewrites sprites while the picture is on screen.** After the
+vblank IRQ its main loop writes sprite RAM on lines 16-79. MAME's own
+timing is the same: a write tap there shows the same lines and the same
+per-16-line counts as the core (frame 700: 59, 110, 118 and 14 writes).
+MAME's `screen_update` draws the whole frame from sprite RAM once, after
+those writes; it has no sprite buffer. The core's line engines draw each
+line from sprite RAM as it is at that moment, so a sprite rewritten after
+the beam passed its top lines shows its old form above the write and its
+new one below. This is MP-4's case (NMKBP964).
+
+**2. Measured, not assumed.** `MP_WRALL=1 MP_WRLOG=0,N` logs every CPU
+write into video memory with its frame, line, data and byte enables.
+`tools/gn_torn.py` replays them:
+- The core's sprite and text RAM at the end of each frame equals MAME's
+  state word for word, and so does its FG VRAM (checked every frame from 251
+  to 1,594).
+- A picture rebuilt line by line (line L shows every write made before line
+  L-1 began, because the engines draw line L during line L-1) is the core's
+  picture exactly.
+
+Of the 668 frames that differ from MAME:
+
+| result | frames |
+|---|---|
+| the torn rebuild, exactly | 550 |
+| within line L-1: every pixel is some cutoff inside the line (the log has line resolution; the engine reads entry by entry within the line) | 99 |
+| not explained (below) | 19 |
+
+Frame 802, for example: 549 pixels differ, lines 31-65, all on the spikes
+of the attract screen's monster (sprites 6-48). The torn rebuild matches
+the core's picture and the whole-frame rebuild matches MAME's.
+
+**3. Two groups the replay does not cover.**
+- **Frame 1570** is a scene change. During visible lines the CPU writes
+  3,976 FG VRAM words, 176 palette entries and a scroll register, so the
+  same tearing hits layers the replay does not rebuild.
+- **Frames 1737-1754: the attract demo diverges.** From frame 1595 the
+  core's sprite RAM at the end of a frame differs from MAME's state (12
+  words, growing to 54 by frame 1653), and the demo plays out differently
+  (the fighters stand elsewhere, and energy shows 5 pips against MAME's 4).
+  The inputs are constant, so this is a control-flow divergence after 26 s
+  of agreement. It is the kind MS1-22 records: a cycle-exact CPU against
+  MAME's scheduling. It is **open**. The picture comparison is meaningful
+  only up to about frame 1594 of this capture.
+
+**What would remove the tearing.** A sprite RAM copy latched at vblank would
+not match MAME: MAME's picture includes writes made during the next 64
+lines. Only drawing a whole frame late would, which adds a frame of lag to
+every layer. The line renderer stays; MAME-exactness is measured on the
+M1 harness (GN-6), and here as "exact or explained by tearing".
