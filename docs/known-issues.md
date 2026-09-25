@@ -308,8 +308,10 @@ counted.
 | pictures against M2's, attract, 1,799 frames | 1,798 identical |
 | latency, clk_sys clocks, average / max | BG 15.2 / 23, FG 15.5 / 35, sprites 15.5 / 21 |
 
-The attract never plays an ADPCM sample, so that stream has no reads here.
-It is checked on the board (M5's audio check).
+The attract never plays an ADPCM sample. Scripted play (`MP_PLAY=1`, 1,300
+frames) does:
+- ADPCM: 22,075 reads, 0 bad, latency 15.2 average / 25 max;
+- the other streams: again 0 bad, 0 overruns, 0 dropped.
 
 **One fix came out of it.** The first run had frame 291 differ from M2 by 1
 pixel. The game writes the scroll registers during visible lines. The tile
@@ -444,7 +446,7 @@ Two further changes make the release deterministic; they are kept:
 The first build had slot 2 on F5, as the siblings do: their F2 is a Service
 key. This board has none, so `savestate_ui.sv` is back on F1-F4.
 
-## GN-11 — M5 on the board: high scores, cheats, OSD and DIP flip, pause, set 2 (closed; autofire open)
+## GN-11 — M5 on the board: high scores, cheats, OSD and DIP flip, pause, autofire, set 2 (closed)
 
 Each feature was driven by the saved settings file:
 `/media/fat/config/ginganin.CFG` (the OSD status word) or
@@ -459,7 +461,7 @@ Each feature was driven by the saved settings file:
 | Pause | Screenshots are identical while paused. The test paused from boot; a pause mid-game was not tried. |
 | Set 2 (`ginganina`) | Boots into the attract. |
 | Savestates | GN-10. |
-| Autofire | **Not tested on the board yet.** The logic is MS1Z's, unchanged. |
+| Autofire | Unlocked by the `.dip` (byte 2 bit 7), P1 at 10 Hz. In a game, Button 1 held, six savestates taken at irregular times. The game's stored input word (work RAM 0x200DC, read from the `.ss` files) has Button 1 down, up, down, down, up, up. Without autofire it is down all six times. (Bit 5 also varies: Left Alt, the save chord's key, is P1 Button 2.) |
 
 **One test error on the way, not the core.** The first patched `.nvm` also
 changed the last byte of the 3-byte top-score record. The vendored `hiscore`
