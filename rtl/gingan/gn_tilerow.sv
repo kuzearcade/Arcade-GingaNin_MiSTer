@@ -43,11 +43,13 @@ module gn_tilerow #(
 	reg [4:0]  i;                   // tile column 0..16
 	reg [8:0]  my;                  // map line 0..511
 	reg [3:0]  fine;
+	reg [15:0] lsx;                 // X scroll latched at start: a mid-line write
+	                                // lands on the next line, whatever the ROM latency (M3)
 	reg [15:0] word;
 	reg        half;                // 0 = left 8 px, 1 = right 8 px
 	reg [31:0] px;
 	reg [3:0]  k;                   // pixel within the half
-	wire [15:0] mapx = sx + {7'd0, i, 4'd0};
+	wire [15:0] mapx = lsx + {7'd0, i, 4'd0};
 	wire [MAPW-6:0] col = mapx[MAPW-2:4];      // mod NCOLS (a power of two)
 	// the screen x of pixel k of this half: 16*i + 8*half + k - fine
 	wire [9:0] scr_x = {1'b0, i, 4'd0} + {5'd0, half, 3'd0} + {6'd0, k} - {6'd0, fine};
@@ -57,7 +59,7 @@ module gn_tilerow #(
 		if (reset) begin st <= S_IDLE; busy <= 1'b0; rom_req <= 1'b0; half <= 1'b0; end
 		else case (st)
 		S_IDLE: if (start) begin
-			busy <= 1'b1; i <= 5'd0; half <= 1'b0; fine <= sx[3:0];
+			busy <= 1'b1; i <= 5'd0; half <= 1'b0; fine <= sx[3:0]; lsx <= sx;
 			my <= {1'b0, line} + sy[8:0];
 			st <= S_MAP;
 		end

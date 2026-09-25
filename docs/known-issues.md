@@ -264,9 +264,94 @@ the core's picture and the whole-frame rebuild matches MAME's.
   of agreement. It is the kind MS1-22 records: a cycle-exact CPU against
   MAME's scheduling. It is **open**. The picture comparison is meaningful
   only up to about frame 1594 of this capture.
+- **Scripted play diverges at the Start press.** The harness applies
+  `gn_play.lua`'s inputs on the same frame numbering (F counts frame
+  boundaries from 1; the same bits). The pictures agree up to the coin
+  (frames 591-595 differ by 3-15 pixels, the same tearing), then the
+  alignment wanders from frame 665, 5 frames after Start, and only 566 of
+  5,108 play frames are exact. Input makes the game sensitive to the same
+  timing difference as the attract divergence above, only sooner. Audio
+  before that point matches MAME's play WAV: envelope correlation 0.90-0.98
+  and level within 0.5 dB over 0.5-11 s.
 
 **What would remove the tearing.** A sprite RAM copy latched at vblank would
 not match MAME: MAME's picture includes writes made during the next 64
 lines. Only drawing a whole frame late would, which adds a frame of lag to
 every layer. The line renderer stays; MAME-exactness is measured on the
 M1 harness (GN-6), and here as "exact or explained by tearing".
+
+## GN-8 — M3: the SDRAM path (closed)
+
+`sim/rtl/gn_hw` runs `gn_core` with `gn_rom_hw` and `rtl/sdram.sv` at
+96 MHz against `sim/models/sdram_model.sv`. The testbench plays
+Main_MiSTer: it sends `image.bin` through the ioctl interface and honours
+`ioctl_wait`.
+
+`gn_rom_hw` gives each ROM stream a `gn_romport` in front of an
+`sdram_arb` channel:
+- port 0 is the download;
+- port 1 is BG and FG;
+- port 2 is sprites;
+- port 3 is ADPCM.
+
+The port holds its own request until the answer arrives. It delivers the
+answer only if the consumer still wants that address. An answer to a
+request the sprite engine withdrew on a restart (GN-6) is discarded and
+counted.
+
+| gate | result |
+|---|---|
+| download | 966,656 bytes, all accepted, 282 ms |
+| copy | 0 of 483,328 words differ |
+| response check (every acknowledged read against the image) | BG 13.7 M, FG 13.7 M, sprites 2.68 M reads: 0 bad |
+| sprite overruns, dropped answers | 0, 0 |
+| pictures against M2's, attract, 1,799 frames | 1,798 identical |
+| latency, clk_sys clocks, average / max | BG 15.2 / 23, FG 15.5 / 35, sprites 15.5 / 21 |
+
+The attract never plays an ADPCM sample, so that stream has no reads here.
+It is checked on the board (M5's audio check).
+
+**One fix came out of it.** The first run had frame 291 differ from M2 by 1
+pixel. The game writes the scroll registers during visible lines. The tile
+engine latched the Y scroll and the fine X at a line's start but read the
+X tile column from the live register, so a write landed partway along the
+row at a point set by the ROM latency. `gn_tilerow` now latches the whole X
+scroll at start: a mid-line write takes effect on the next line, whatever
+the memory timing. M1 was re-run afterwards, 4,098 / 4,098, and M2's
+attract result is unchanged (840 exact).
+
+**The one remaining difference is the sprite window of GN-7.** Frame 583
+differs from M2 by 6 pixels on line 56, and the CPU writes sprite RAM on
+lines 54-58 of that frame. The sprite engine reads its entries through a
+line at a rate the ROM latency sets, so which side of a mid-line write it
+sees can move. This is inherent in a live line renderer; it is not a memory
+error.
+
+## GN-9 — M4: Quartus and the first board run (closed)
+
+- **M10K.** The first `quartus_map` had 158,441 registers:
+  - `gn_video`'s BG map was one array read at two addresses a clock, and
+    the text tiles at four. Neither infers as M10K; both are now byte
+    lanes, one read each.
+  - The sprite line buffer's clear-on-read was a second write port. Each
+    bank now keeps 256 "written" flags in registers, cleared at the swap,
+    and the RAM is one write and one read.
+
+  After both changes: 23,743 registers, with every array in M10K.
+- **Full compile** (seed 1, `build.sh`): 45 % of ALMs, 427 / 553 M10K,
+  timing met with no violations.
+- **Board** (192.168.1.138; `.rbf` md5 `418aee15...`; the `.mra` files and
+  the ROM zips were deployed and checked by md5):
+  - set 1 boots into the attract;
+  - a screenshot of the static character roster is **pixel-identical to
+    MAME's frames 1316-1320**;
+  - screenshots of later scenes are correct pictures (the space scene,
+    the temple stage) but fall outside the 30 s MAME capture;
+  - HDMI audio through the capture box has music at an RMS of about 470,
+    varying second to second.
+- **The .mra button list** was "Button 1,Button 2,Start,Coin". MiSTer
+  places `<buttons>` entry k on joystick bit 4+k, and the core (like MS1Z)
+  expects "Button 1,Button 2,Button 3,Start,Coin", with Button 3 as the
+  autofire plain-fire alias. `tools/gen_gn_mra.py` now writes that list.
+- **Savestates** are not in this build: `gn_core` has no park/replay port
+  yet (M5).

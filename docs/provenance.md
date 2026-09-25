@@ -14,6 +14,8 @@ Where every file came from. Pins are in `deps.lock`.
 | `rtl/third_party/ym2149/ym2149_zx.sv` | MiSTer-devel/ZX-Spectrum_MISTer `rtl/ym2149.sv` | modified: the volume table is a `localparam` array instead of an initialised `wire` (Verilator); chosen over MSX_MiSTer's copy by Q5 (GN-5) |
 | `rtl/third_party/mc6809/mc6809is.v` | Arcade-TimePilot84_MiSTer (upstream cavnex/mc6809) | modified: power-up values on the NMI/IRQ/FIRQ latches and samples (GN-4); `LICENSE.md` from upstream (BSD) |
 | `rtl/third_party/jtopl/` | jotego/jtopl `hdl/` | verbatim, GPL-3.0 |
+| `GingaNin.sv` | Arcade-JalecoMS1Z_MiSTer `MS1Z.sv` | derived: this board's inputs, raster, SDRAM ports; no savestates yet |
+| `GingaNin.qpf`, `.qsf`, `.sdc`, `files_gn.qip`, `build.sh` | Arcade-JalecoMS1Z_MiSTer's project files and build script | derived |
 
 ## Tools and simulation
 
@@ -24,4 +26,7 @@ Where every file came from. Pins are in `deps.lock`.
 | `tools/gn_sndcmp.py`, `sim/rtl/gn_snd/` | new | the sound-board trace gate (GN-4) |
 | `rtl/gingan/gn_ptm6840.sv`, `gn_sound.sv`, `gn_y8950.sv` | new | |
 | `rtl/gingan/gn_adpcmb.sv` | new: a port of MAME's ymfm `adpcm_b_channel` (Aaron Giles, BSD-3-Clause) | GN-5 |
+| `rtl/gingan/gn_main.sv`, `gn_core.sv`, `gn_rom_hw.sv` (with `gn_romport`) | new; `gn_rom_hw`'s download follows MS1Z's `ms1z_rom_hw` | |
+| `sim/rtl/gn_frames/`, `sim/rtl/gn_hw/`, `tools/gn_torn.py` | new; `gn_hw` follows NMKBP964's `macplus_hw` | M2, M3 (GN-7, GN-8) |
+| `sim/models/sdram_model.sv` | Arcade-NMKBP964_MiSTer | verbatim |
 | `sim/oracle/ymfm_y8950/` | new; compiles `~/mame/3rdparty/ymfm` in place | the Y8950 oracle |

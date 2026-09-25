@@ -112,7 +112,10 @@ def rom_xml(setname):
             out.append(f'    <part repeat="0x{size - used:X}">00</part>\n')
     return ''.join(out)
 
-BUTTONS = ('Button 1,Button 2,Start,Coin', 'A,B,Start,R')
+# Positional: MiSTer puts <buttons> entry k on joystick bit 4+k, and
+# GingaNin.sv's CONF_STR J1 line and input mapping expect exactly this list.
+# Button 3 is the autofire plain-fire alias (a plain Button 1 otherwise unused).
+BUTTONS = ('Button 1,Button 2,Button 3,Start,Coin', 'Y,B,A,Start,R')
 
 def mra(setname):
     s = R.SETS[setname]

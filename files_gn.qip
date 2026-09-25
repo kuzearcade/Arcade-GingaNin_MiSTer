@@ -1,0 +1,48 @@
+# Ginga Ninkyouden -- file list for the GingaNin .rbf.
+# Add files HERE, never through the Quartus IDE.
+#
+# jtopl is a directory of small modules and this design instantiates only
+# jtopl.v; SEARCH_PATH resolves the rest by module name, the way Verilator's
+# -y does in the sim Makefiles.
+set_global_assignment -name SEARCH_PATH rtl/third_party/jtopl
+
+# Top level and clocks
+set_global_assignment -name SYSTEMVERILOG_FILE GingaNin.sv
+set_global_assignment -name VERILOG_FILE rtl/pll.v
+
+# Video output chain
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/video_retime.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/third_party/crt_adjust/rtl/crt_vsize.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/third_party/crt_adjust/rtl/crt_adjust.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/crt_chain.sv
+
+# The board
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/gingan/gn_core.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/gingan/gn_main.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/gingan/gn_video.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/gingan/gn_tilerow.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/gingan/gn_sprline.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/gingan/gn_sound.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/gingan/gn_ptm6840.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/gingan/gn_y8950.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/gingan/gn_adpcmb.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/gingan/gn_rom_hw.sv
+
+# SDRAM controller and arbiter
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sdram.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sdram_req.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/sdram_arb.sv
+
+# CPUs and sound chips
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/third_party/fx68k/fx68k.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/third_party/fx68k/fx68kAlu.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/third_party/fx68k/uaddrPla.sv
+set_global_assignment -name VERILOG_FILE rtl/third_party/mc6809/mc6809is.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/third_party/ym2149/ym2149_zx.sv
+set_global_assignment -name VERILOG_FILE rtl/third_party/jtopl/jtopl.v
+
+# OSD features: high scores and cheats share the work-RAM back door.
+set_global_assignment -name VERILOG_FILE rtl/third_party/hiscore/hiscore.v
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/cheats.sv
+
+set_global_assignment -name SDC_FILE GingaNin.sdc

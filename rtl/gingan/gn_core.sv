@@ -6,6 +6,7 @@ module gn_core (
 	input             clk,
 	input             reset,
 	input             pause,
+	input             flip_osd,
 	// ROM download (image offsets below 0x3C000 are kept here)
 	input             dl_we,
 	input      [19:0] dl_addr,
@@ -75,7 +76,7 @@ module gn_core (
 		.dbg_addr(dbg_addr), .dbg_wr(dbg_wr), .dbg_irq1(dbg_irq1), .dbg_iack1(dbg_iack1));
 
 	gn_video u_video (
-		.clk(clk), .reset(reset),
+		.clk(clk), .reset(reset), .flip_osd(flip_osd),
 		.ce_pix(ce_pix), .hcount(hcount), .vcount(vcount), .hblank(hblank), .vblank(vblank),
 		.hsync(hsync), .vsync(vsync), .vblank_start(vblank_start),
 		.sel_txt(v_txt), .sel_spr(v_spr), .sel_pal(v_pal), .sel_reg(v_reg), .sel_fg(v_fg),

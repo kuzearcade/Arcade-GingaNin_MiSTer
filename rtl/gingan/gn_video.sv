@@ -24,6 +24,7 @@
 module gn_video (
 	input             clk,
 	input             reset,
+	input             flip_osd,      // the OSD's Flip screen, composed with the game's own bit
 	// raster out
 	output reg        ce_pix,
 	output reg [8:0]  hcount,
@@ -99,7 +100,7 @@ module gn_video (
 	genvar gi;
 	generate for (gi = 0; gi < 8; gi = gi + 1) begin : vo assign vreg_out[gi] = vr[gi]; end endgenerate
 	wire [3:0] ctrl = vr[4][3:0];
-	wire       flip = ~vr[6][0];
+	wire       flip = ~vr[6][0] ^ flip_osd;
 	assign layer_ctrl_dbg = ctrl[2:0];
 
 	// ---------------------------------------------------------------- CPU RAMs
@@ -153,12 +154,17 @@ module gn_video (
 	end
 
 	// ---------------------------------------------------------------- ROM BRAMs
-	reg [7:0]  bgmap [0:32767];
-	reg [7:0]  txtt [0:16383];
-	always @(posedge clk) begin
-		if (dl_we &&  dl_bgmap) bgmap[dl_addr] <= dl_data;
-		if (dl_we && !dl_bgmap) txtt[dl_addr[13:0]] <= dl_data;
-	end
+	// One byte lane per array and one read per lane per clock, so each infers
+	// as M10K: a single array read at two or four addresses a clock does not
+	// (it became 136k registers in the first quartus_map).
+	reg [7:0]  bgm_e [0:16383], bgm_o [0:16383];         // BG map, even / odd bytes
+	reg [7:0]  txt_0 [0:4095], txt_1 [0:4095], txt_2 [0:4095], txt_3 [0:4095];   // text tiles, byte k of each 32-bit row
+	always @(posedge clk) if (dl_we &&  dl_bgmap && !dl_addr[0]) bgm_e[dl_addr[14:1]] <= dl_data;
+	always @(posedge clk) if (dl_we &&  dl_bgmap &&  dl_addr[0]) bgm_o[dl_addr[14:1]] <= dl_data;
+	always @(posedge clk) if (dl_we && !dl_bgmap && dl_addr[1:0] == 2'd0) txt_0[dl_addr[13:2]] <= dl_data;
+	always @(posedge clk) if (dl_we && !dl_bgmap && dl_addr[1:0] == 2'd1) txt_1[dl_addr[13:2]] <= dl_data;
+	always @(posedge clk) if (dl_we && !dl_bgmap && dl_addr[1:0] == 2'd2) txt_2[dl_addr[13:2]] <= dl_data;
+	always @(posedge clk) if (dl_we && !dl_bgmap && dl_addr[1:0] == 2'd3) txt_3[dl_addr[13:2]] <= dl_data;
 
 	// ---------------------------------------------------------------- line engines
 	// At the end of line v the buffers swap: the bank drawn during line v is
@@ -180,7 +186,8 @@ module gn_video (
 	// BG: map from the BRAM (big-endian word), tiles from bg_*
 	wire [13:0] bg_map_a;
 	reg  [15:0] bg_map_q;
-	always @(posedge clk) bg_map_q <= {bgmap[{bg_map_a, 1'b0}], bgmap[{bg_map_a, 1'b1}]};
+	always @(posedge clk) bg_map_q[15:8] <= bgm_e[bg_map_a];
+	always @(posedge clk) bg_map_q[7:0]  <= bgm_o[bg_map_a];
 	wire        bg_we;  wire [7:0] bg_x, bg_d;
 	gn_tilerow #(.NCOLS(512), .MAPW(14)) u_bg (
 		.clk(clk), .reset(reset), .start(start), .line(src_q), .sx(vr[3]), .sy(vr[2]), .busy(),
@@ -217,7 +224,10 @@ module gn_video (
 	always @(posedge clk) tx_map_q <= {txt_h[tx_map_a], txt_l[tx_map_a]};
 	reg  [13:0] tx_rom_a;
 	reg  [31:0] tx_rom_q;
-	always @(posedge clk) tx_rom_q <= {txtt[{tx_rom_a[13:2], 2'd0}], txtt[{tx_rom_a[13:2], 2'd1}], txtt[{tx_rom_a[13:2], 2'd2}], txtt[{tx_rom_a[13:2], 2'd3}]};
+	always @(posedge clk) tx_rom_q[31:24] <= txt_0[tx_rom_a[13:2]];
+	always @(posedge clk) tx_rom_q[23:16] <= txt_1[tx_rom_a[13:2]];
+	always @(posedge clk) tx_rom_q[15:8]  <= txt_2[tx_rom_a[13:2]];
+	always @(posedge clk) tx_rom_q[7:0]   <= txt_3[tx_rom_a[13:2]];
 	always @(posedge clk) begin
 		tx_we <= 1'b0;
 		if (reset) tx_st <= 3'd0;
@@ -243,8 +253,11 @@ module gn_video (
 	// ---------------------------------------------------------------- line buffers
 	// two banks per layer: the engines write bank ~bufsel, the beam reads bank
 	// bufsel. BG, FG and text write every pixel of their line (pen 15
-	// included); sprites write only their own pixels, so the beam clears the
-	// sprite bank to pen 15 as it reads it (a second port: true dual port).
+	// included); sprites write only their own pixels, so each sprite bank has
+	// a 256-bit "written" flag vector, cleared in one clock when the bank
+	// becomes the write bank. A pixel never written reads as pen 15. (The
+	// first version cleared the RAM itself as the beam read it; a second write
+	// port does not infer as M10K, and it became 4,096 registers.)
 	reg [7:0] lb_bg [0:511], lb_fg [0:511], lb_sp [0:511], lb_tx [0:511];
 	wire [7:0] rx = flip ? 8'd255 - hcount[7:0] : hcount[7:0];
 	reg  [7:0] q_bg, q_fg, q_sp, q_tx;
@@ -257,8 +270,22 @@ module gn_video (
 		if (fg_we) lb_fg[{~bufsel, fg_x}] <= fg_d;
 		if (rd) q_fg <= lb_fg[{bufsel, rx}];
 	end
+	reg  [7:0]   q_sp_ram;
+	reg  [255:0] sp_wr0, sp_wr1;                      // written flags, bank 0 and 1
+	reg          q_sp_v;
 	always @(posedge clk) if (sp_we) lb_sp[{~bufsel, sp_x}] <= sp_d;
-	always @(posedge clk) if (rd) begin q_sp <= lb_sp[{bufsel, rx}]; lb_sp[{bufsel, rx}] <= 8'h0F; end
+	always @(posedge clk) if (rd) q_sp_ram <= lb_sp[{bufsel, rx}];
+	always @(posedge clk) begin
+		if (reset) begin sp_wr0 <= '0; sp_wr1 <= '0; end
+		else begin
+			// at a swap the bank just shown becomes the write bank: clear it
+			// (a write lands in bank ~bufsel, the clear in bank bufsel: never the same)
+			if (sp_we) begin if (bufsel) sp_wr0[sp_x] <= 1'b1; else sp_wr1[sp_x] <= 1'b1; end
+			if (line_start) begin if (bufsel) sp_wr1 <= '0; else sp_wr0 <= '0; end
+		end
+		if (rd) q_sp_v <= bufsel ? sp_wr1[rx] : sp_wr0[rx];
+	end
+	always @(*) q_sp = q_sp_v ? q_sp_ram : 8'h0F;
 	always @(posedge clk) begin
 		if (tx_we) lb_tx[{~bufsel, tx_x}] <= tx_d;
 		if (rd) q_tx <= lb_tx[{bufsel, rx}];
