@@ -153,7 +153,13 @@ module gn_main (
 	end
 	wire ready = cyc >= 2'd2;
 	always @(*) begin
-		if (sel_mon)       iEdb = mon_data;
+		// interrupt acknowledge: the autovector numbers (24 + level) on the data
+		// bus with DTACK, not VPA. A VPA cycle syncs to fx68k's internal E clock
+		// (CPU clock / 10), whose phase is not part of a savestate: after a load
+		// every interrupt entry took a few cycles more or less than after the
+		// save, and the game diverged within a frame (GN-10).
+		if (iack)          iEdb = {8'hFF, 8'd24 + {5'd0, eab[3:1]}};
+		else if (sel_mon)  iEdb = mon_data;
 		else if (sel_rom)  iEdb = {rom_qh, rom_ql};
 		else if (sel_ram)  iEdb = {ram_qh, ram_ql};
 		else if (sel_vid)  iEdb = v_dout;
@@ -211,7 +217,7 @@ module gn_main (
 		.eRWn(eRWn), .ASn(ASn), .LDSn(LDSn), .UDSn(UDSn), .E(), .VMAn(VMAn),
 		.FC0(FC0), .FC1(FC1), .FC2(FC2), .BGn(BGn),
 		.oRESETn(oRESETn), .oHALTEDn(oHALTEDn),
-		.DTACKn(~(as_active & ~iack & ready & ~park_stall)), .VPAn(~iack), .BERRn(1'b1), .BRn(1'b1), .BGACKn(1'b1),
+		.DTACKn(~(as_active & ready & ~park_stall)), .VPAn(1'b1), .BERRn(1'b1), .BRn(1'b1), .BGACKn(1'b1),
 		.IPL0n(~(irq1 | ipl_park[0])), .IPL1n(~ipl_park[1]), .IPL2n(~ipl_park[2]),
 		.iEdb(iEdb), .oEdb(oEdb), .eab(eab)
 	);

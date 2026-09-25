@@ -356,7 +356,7 @@ error.
 - **Savestates** are not in this build: `gn_core` has no park/replay port
   yet (M5).
 
-## GN-10 — Savestates: both CPUs parked, the sound board frozen, the chips replayed (closed)
+## GN-10 — Savestates: both CPUs parked, the sound board frozen, the chips replayed (closed: SS-13 passes in attract and play)
 
 The engine is NMKBP964's `savestate.sv` with a fixed read latency (RD_LAT 4:
 every source here is a BRAM or a register, so the VARLAT handshake the plan
@@ -405,18 +405,33 @@ slot 2 60 frames after that resume. Slots 1 and 2 are one state reached two
 ways.
 - Attract, save at frame 300: **0 words differ; 59 of 59 pictures after
   the resumes identical.**
-- Scripted play, save at frame 900: **open**.
-  - The harness replays `gn_play.lua`'s inputs from the loaded frame, and
-    the input words match frame for frame after both resumes.
-  - The first picture after each resume is identical. The second differs
-    in one sprite's area, and the game diverges from there.
-  - A save one frame after each resume shows the main board's state
-    identical. The sound board is 3 E cycles apart: the PTM counter and the
-    clock accumulator.
-  - Two fixes are in: the 68000's RESUME read is held (no DTACK) until the
-    release, and the sound clock stops at the 6809's loop head, so both
-    leave their monitors on a fixed clock. They did not change the result.
-    The investigation continues.
+- Scripted play, save at frame 900: **0 words differ, sound board
+  included; 59 of 59 pictures identical.** The harness replays
+  `gn_play.lua`'s inputs from the loaded frame.
+
+The play gate first failed, and a CPU write log after each resume (with the
+beam position) found two causes:
+- **The interrupt acknowledge synced to fx68k's E clock.** The first writes
+  after the resumes matched to the dot; the second, after the IRQ1
+  acknowledge, came 40 clocks later on the load path. A VPA (autovector)
+  cycle waits for the 68000's internal E clock (CPU clock / 10). Its phase
+  counts every CPU clock since reset, is not in the image, and differs
+  between the two paths, so every interrupt entry after a load took a few
+  cycles more or less. This game is that timing-sensitive (GN-7's
+  divergences).
+  - `gn_main` now answers interrupt acknowledges with DTACK and the vector
+    number 24 + level: the same vectors as the autovectors, with no E sync.
+  - Nothing else on this board uses VPA or E.
+  - M2's attract against MAME is unchanged by it: 841 of 1,508 exact
+    (840 before).
+- **A harness bug.** The load completes a few hundred clocks after the
+  frame boundary at which it resumes, so that frame's input had been set
+  from the unshifted schedule. The input word the game stored then
+  differed (Button 2). The input is now set again when the load completes.
+
+Two further changes make the release deterministic; they are kept:
+- the 68000 monitor's RESUME read is held without DTACK until the release;
+- the sound clock stops exactly at the 6809's loop head.
 
 **Board:** Alt+F1 wrote `Ginga Ninkyouden (set 1)_1.ss`, 45,736 bytes (8 +
 0x5950 x 2). F1, 15 s later, brought the same scene back:
@@ -428,3 +443,26 @@ ways.
 
 The first build had slot 2 on F5, as the siblings do: their F2 is a Service
 key. This board has none, so `savestate_ui.sv` is back on F1-F4.
+
+## GN-11 — M5 on the board: high scores, cheats, OSD and DIP flip, pause, set 2 (closed; autofire open)
+
+Each feature was driven by the saved settings file:
+`/media/fat/config/ginganin.CFG` (the OSD status word) or
+`config/dips/<name>.dip` (the switches). Each was judged by screenshots.
+
+| feature | result |
+|---|---|
+| High scores | `hiscore.dat`'s 3 records, 214 bytes. The dump saves on OSD open. A patched `.nvm` (top score 760000, table No. 1 765400) is restored: HIGH-SCORE reads 760000 and the ranking lists 765400. |
+| Cheats | Infinite Time holds the stage timer at 999 in the demo. The other five slots come from the same `ginganin.xml` table. |
+| Flip screen (OSD) | An exact rot180: 0 of 57,344 pixels differ from the unflipped shot, turned. |
+| Flip Screen DIP | The game's own flip: the picture turns. |
+| Pause | Screenshots are identical while paused. The test paused from boot; a pause mid-game was not tried. |
+| Set 2 (`ginganina`) | Boots into the attract. |
+| Savestates | GN-10. |
+| Autofire | **Not tested on the board yet.** The logic is MS1Z's, unchanged. |
+
+**One test error on the way, not the core.** The first patched `.nvm` also
+changed the last byte of the 3-byte top-score record. The vendored `hiscore`
+(NMK16's modified copy) validates each record's first and last byte against
+`hiscore.dat` before restoring, so it rightly discarded that dump. Patch only
+bytes inside a record.

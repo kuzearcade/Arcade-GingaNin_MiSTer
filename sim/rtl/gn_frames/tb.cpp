@@ -58,6 +58,20 @@ int main(int argc, char **argv) {
 	auto row = [&](const std::vector<uint8_t> &r, uint32_t a) { uint32_t v = 0; for (int i = 0; i < 4; i++) v = v << 8 | (a + i < r.size() ? r[a + i] : 0); return v; };
 	std::vector<uint32_t> fb(256 * 224);
 	int ph = -1, pv = -1, cur_frame = 0;
+	// gn_play.lua's inputs for its frame F
+	auto play_in = [&](int F) -> uint16_t {
+		uint16_t in = 0xFFFF;
+		if (F >= F0 && F < F0 + 6) in &= ~(1 << 12);          // coin 1
+		if (F >= F0 + 60 && F < F0 + 66) in &= ~(1 << 14);    // start 1
+		if (F >= F0 + 120) {
+			if ((F % 8) < 4) in &= ~(1 << 4);                  // button 1
+			if ((F % 97) < 6) in &= ~(1 << 5);                 // button 2
+			static const int mv[7][2] = {{-1,-1},{3,-1},{3,-1},{2,-1},{3,0},{1,-1},{3,-1}};
+			const int *m = mv[(F / 60) % 7];
+			for (int k = 0; k < 2; k++) if (m[k] >= 0) in &= ~(1 << m[k]);
+		}
+		return in;
+	};
 	auto tick = [&]() {
 		t->clk = 0; t->eval();
 		// ROM ports: held request, ack after 12 clocks
@@ -82,7 +96,11 @@ int main(int argc, char **argv) {
 			if (t->ss_done_fail) { printf("SS gate: FAIL\n"); exit(1); }
 			ss_step++; ss_mark = frame_now;
 			if (ss_step == 2) ss_r0 = frame_now;                 // slot 0 saved: resumed here
-			if (ss_step == 6) ss_in_off = frame_now - ss_r0;     // slot 0 loaded: the same game frame
+			if (ss_step == 6) {
+				ss_in_off = frame_now - ss_r0;     // slot 0 loaded: the same game frame
+				// the load resumed after this frame's inputs were set: set them again
+				if (play) t->p1p2 = play_in(frame_now - ss_in_off);
+			}
 		}
 #endif
 		t->clk = 1; t->eval(); cyc++;
@@ -125,15 +143,8 @@ int main(int argc, char **argv) {
 				// inputs from there (the harness's own frame count ran on)
 				F -= ss_in_off;
 #endif
-				uint16_t in = 0xFFFF;
-				if (F >= F0 && F < F0 + 6) in &= ~(1 << 12);          // coin 1
-				if (F >= F0 + 60 && F < F0 + 66) in &= ~(1 << 14);    // start 1
+				uint16_t in = play_in(F);
 				if (F >= F0 + 120) {
-					if ((F % 8) < 4) in &= ~(1 << 4);                  // button 1
-					if ((F % 97) < 6) in &= ~(1 << 5);                 // button 2
-					static const int mv[7][2] = {{-1,-1},{3,-1},{3,-1},{2,-1},{3,0},{1,-1},{3,-1}};
-					const int *m = mv[(F / 60) % 7];
-					for (int k = 0; k < 2; k++) if (m[k] >= 0) in &= ~(1 << m[k]);
 					// the lives poke: pause, write 0x020058 = 3, resume
 					t->pause = 1; for (int i = 0; i < 16; i++) tick();
 					t->ram2_sel = 1; t->ram2_addr = 0x2C; t->ram2_be = 3; t->ram2_din = 3; t->ram2_we = 1; tick();
