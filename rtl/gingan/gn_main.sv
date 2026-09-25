@@ -51,7 +51,17 @@ module gn_main (
 	output     [23:0] dbg_addr,
 	output            dbg_wr,        // the CPU is in a write cycle
 	output reg [31:0] dbg_irq1,
-	output reg [31:0] dbg_iack1
+	output reg [31:0] dbg_iack1,
+	// savestate: the 68000 park (ss_m68k_park: a level-7 interrupt into a
+	// monitor overlay at 0x1E8000, unmapped on this board) and the scalars
+	//   ss_sel 0-3 SSP/USP (the park's state registers), 4 {irq1}, 5 cmd
+	input             park_req,
+	output            parked,
+	input             resume,
+	input      [2:0]  ss_sel,
+	input             ss_wr,
+	input      [15:0] ss_wdata,
+	output reg [15:0] ss_rdata
 );
 	// ---------------------------------------------------------------- clocking
 	reg pause_68k = 1'b0;
@@ -143,11 +153,32 @@ module gn_main (
 	end
 	wire ready = cyc >= 2'd2;
 	always @(*) begin
-		if (sel_rom)       iEdb = {rom_qh, rom_ql};
+		if (sel_mon)       iEdb = mon_data;
+		else if (sel_rom)  iEdb = {rom_qh, rom_ql};
 		else if (sel_ram)  iEdb = {ram_qh, ram_ql};
 		else if (sel_vid)  iEdb = v_dout;
 		else if (sel_in)   iEdb = a[1] ? dsw : p1p2;
 		else               iEdb = 16'h0000;
+	end
+
+	// ---------------------------------------------------------------- park
+	reg         irq1;
+	wire        sel_mon;
+	wire [15:0] mon_data, park_rd;
+	wire [2:0]  ipl_park;
+	wire        park_stall;
+	ss_m68k_park #(.MON_BASE(15'h0F40)) u_park (
+		.clk(clk), .reset(reset), .phi(enPhi2),
+		.park_req(park_req), .parked(parked), .resume(resume),
+		.eab(eab), .ASn(ASn), .eRWn(eRWn), .FC0(FC0), .FC1(FC1), .FC2(FC2), .oEdb(oEdb),
+		.ipl_park(ipl_park), .sel_mon(sel_mon), .mon_data(mon_data), .stall(park_stall),
+		.ss_sel(ss_sel[1:0]), .ss_wr(ss_wr && !ss_sel[2]), .ss_wdata(ss_wdata), .ss_rdata(park_rd));
+	always @(*) begin
+		case (ss_sel)
+			3'd4:    ss_rdata = {15'd0, irq1};
+			3'd5:    ss_rdata = {8'd0, cmd};
+			default: ss_rdata = ss_sel[2] ? 16'h0000 : park_rd;
+		endcase
 	end
 
 	// ---------------------------------------------------------------- latch
@@ -159,16 +190,18 @@ module gn_main (
 		cmd_we <= 1'b0;
 		if (wr & sel_reg & (a[3:1] == 3'd7) & ~wr_d & be[0]) begin cmd_we <= 1'b1; cmd <= oEdb[7:0]; end
 		else if (wr & sel_reg & (a[3:1] == 3'd7) & ~wr_d) cmd_we <= 1'b1;   // upper byte only: the latch keeps its low byte
+		if (ss_wr && ss_sel == 3'd5) cmd <= ss_wdata[7:0];
 	end
 
 	// ---------------------------------------------------------------- IRQ1
-	reg irq1, iack_d;
+	reg iack_d;
 	always @(posedge clk) begin
 		iack_d <= iack;
 		if (reset) begin irq1 <= 1'b0; dbg_irq1 <= 32'd0; dbg_iack1 <= 32'd0; end
 		else begin
 			if (vblank_start) begin irq1 <= 1'b1; dbg_irq1 <= dbg_irq1 + 32'd1; end
 			else if (iack & ~iack_d & eab[3:1] == 3'd1) begin irq1 <= 1'b0; dbg_iack1 <= dbg_iack1 + 32'd1; end
+			if (ss_wr && ss_sel == 3'd4) irq1 <= ss_wdata[0];
 		end
 	end
 
@@ -178,8 +211,8 @@ module gn_main (
 		.eRWn(eRWn), .ASn(ASn), .LDSn(LDSn), .UDSn(UDSn), .E(), .VMAn(VMAn),
 		.FC0(FC0), .FC1(FC1), .FC2(FC2), .BGn(BGn),
 		.oRESETn(oRESETn), .oHALTEDn(oHALTEDn),
-		.DTACKn(~(as_active & ~iack & ready)), .VPAn(~iack), .BERRn(1'b1), .BRn(1'b1), .BGACKn(1'b1),
-		.IPL0n(~irq1), .IPL1n(1'b1), .IPL2n(1'b1),
+		.DTACKn(~(as_active & ~iack & ready & ~park_stall)), .VPAn(~iack), .BERRn(1'b1), .BRn(1'b1), .BGACKn(1'b1),
+		.IPL0n(~(irq1 | ipl_park[0])), .IPL1n(~ipl_park[1]), .IPL2n(~ipl_park[2]),
 		.iEdb(iEdb), .oEdb(oEdb), .eab(eab)
 	);
 endmodule

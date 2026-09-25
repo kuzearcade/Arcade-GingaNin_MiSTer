@@ -63,7 +63,13 @@ module gn_video (
 	input      [31:0] spr_data,
 	// picture
 	output reg [23:0] rgb,
-	output     [15:0] dbg_spr_overruns
+	output     [15:0] dbg_spr_overruns,
+	// savestate: the palette-written flags (GN-1), 64 words of 16 (entry
+	// 16i+k is word i bit k). The memories go through the CPU port.
+	input      [5:0]  ss_pw_idx,
+	input             ss_pw_wr,
+	input      [15:0] ss_wdata,
+	output     [15:0] ss_pw_rdata
 );
 	// ---------------------------------------------------------------- raster
 	reg [2:0] div;
@@ -150,8 +156,11 @@ module gn_video (
 	reg [1023:0] pal_wr;
 	always @(posedge clk) begin
 		if (reset) pal_wr <= '0;
+		else if (ss_pw_wr) pal_wr[{ss_pw_idx, 4'd0} +: 16] <= ss_wdata;
 		else if (pw) pal_wr[cpu_addr[9:0]] <= 1'b1;
 	end
+
+	assign ss_pw_rdata = pal_wr[{ss_pw_idx, 4'd0} +: 16];
 
 	// ---------------------------------------------------------------- ROM BRAMs
 	// One byte lane per array and one read per lane per clock, so each infers

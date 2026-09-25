@@ -58,4 +58,31 @@
     <part crc="0ed9133b" name="gn_04.bin"/>
     <part crc="f1ba222c" name="gn_03.bin"/>
   </rom>
+
+  <!-- High scores: MAME hiscore.dat entries for ginganin, and the
+       saved dump. See tools/gen_hiscore_mra.py. -->
+  <rom index="3" md5="none">
+    <part>
+        0C 00 00 00 00 FF 00 02 00 02 00 01 00 FF 02 00
+        00 02 02 91 00 50 00 59
+        00 02 02 E1 00 83 20 09
+        00 02 01 1D 00 03 00 00
+    </part>
+  </rom>
+  <nvram index="4" size="214"/>
+
+  <!-- Cheats (Pugsy's MAME cheat database). Slots in fixed order:
+       Infinite Time, Infinite Energy, Infinite Beam, Infinite Sword, P1 Infinite Lives, P2 Infinite Lives, (unused).
+       This set provides: Infinite Time, Infinite Energy, Infinite Beam, Infinite Sword, P1 Infinite Lives, P2 Infinite Lives. See tools/gen_cheats_mra.py. -->
+  <rom index="5" md5="none">
+    <part>
+        02 00 02 00 A5 00 00 99 02 00 A4 00 00 09 00 00 00 00 00 00
+        01 00 02 00 A9 00 00 08 00 00 00 00 00 00 00 00 00 00 00 00
+        01 00 02 02 4D 00 00 14 00 00 00 00 00 00 00 00 00 00 00 00
+        01 00 02 00 8D 00 00 03 00 00 00 00 00 00 00 00 00 00 00 00
+        01 00 02 00 59 00 00 05 00 00 00 00 00 00 00 00 00 00 00 00
+        01 00 02 00 5D 00 00 05 00 00 00 00 00 00 00 00 00 00 00 00
+        00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+    </part>
+  </rom>
 </misterromdescription>

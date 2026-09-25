@@ -46,7 +46,30 @@ module gn_sound (
 	output            dbg_rnw,
 	output     [7:0]  dbg_di,
 	output            dbg_fallE,
-	output            dbg_nmi_n
+	output            dbg_nmi_n,
+	// savestate (docs/PLAN.md 2.9, Appendix C). `hold` freezes the board's
+	// clock (6809, PTM, chips) from the moment every CPU is parked until the
+	// release; the state bus reads/writes the words below (ss_a, local word
+	// address; data one clock after the address, registered twice):
+	//   000-7FF RAM (a byte a word)   800-8FF Y8950 register shadow
+	//   900-913 ADPCM unit            920-92F YM2149 register shadow
+	//   930-93A PTM                   940 latch  941 NMI hold
+	//   942-943 clock accumulator     944 {E phase, PSG divider}
+	//   945 Y8950 address  946 YM2149 address  947 6809 park S
+	// A load ends with `ss_replay`: the shadows are written back into the
+	// chips (FM part only for the Y8950), then ss_replay_done.
+	input             hold,            // request: the clock stops at the park loop's head (held)
+	output reg        held,
+	input             park_req,
+	output            parked,
+	input             resume,
+	input             ss_act,          // the engine owns the RAM port
+	input      [11:0] ss_a,
+	input             ss_wr,
+	input      [15:0] ss_wdata,
+	output reg [15:0] ss_rdata,
+	input             ss_replay,
+	output reg        ss_replay_done
 );
 	// ---------------------------------------------------------------- clocks
 	reg  [23:0] acc = 24'd0;
@@ -61,7 +84,7 @@ module gn_sound (
 		// E must keep running while reset is held (the first harness run held
 		// the generator in reset too, and the CPU started from random state)
 		q4 <= 1'b0; fallE <= 1'b0; fallQ <= 1'b0; ce_e <= 1'b0;
-		if (!pause) begin
+		if (!pause && !held) begin
 			if (acc + 24'd715909 >= 24'd9600000) begin
 				acc <= acc + 24'd715909 - 24'd9600000; q4 <= 1'b1;
 				ph <= ph + 2'd1; psg_div <= ~psg_div;
@@ -69,7 +92,20 @@ module gn_sound (
 				if (ph == 2'd3) fallQ <= 1'b1;
 			end else acc <= acc + 24'd715909;
 		end
+		if (ss_wr && ss_a == 12'h942) acc[23:16] <= ss_wdata[7:0];
+		if (ss_wr && ss_a == 12'h943) acc[15:0] <= ss_wdata;
+		if (ss_wr && ss_a == 12'h944) begin ph <= ss_wdata[2:1]; psg_div <= ss_wdata[0]; end
 	end
+	// the chips' clock during a replay (the board's own is held): 3.69 MHz
+	reg [3:0] rep_div = 4'd0;
+	reg       rep_ce;
+	always @(posedge clk) begin
+		rep_ce <= 1'b0;
+		if (rep_div == 4'd12) begin rep_div <= 4'd0; rep_ce <= 1'b1; end else rep_div <= rep_div + 4'd1;
+	end
+	wire replaying;
+	wire ce_opl  = replaying ? rep_ce : ce_q4;
+	wire ce_ym   = replaying ? rep_ce : ce_psg;
 
 	// ---------------------------------------------------------------- 6809
 	wire [15:0] a;
@@ -79,10 +115,26 @@ module gn_sound (
 	wire        ptm_irq_n;
 	wire [2:0]  ptm_out;
 	reg  [1:0]  nmi_hold;          // E cycles of NMI low still to go
+	wire        bs, ba, nmi_park_n, sel_mon, at_head;
+	// The clock stops exactly after the 6809 fetches the first opcode of its
+	// park loop, so after the release it always continues from that point:
+	// the sound board resumes on the same E cycle after a save and a load.
+	always @(posedge clk) begin
+		if (reset || !hold) held <= 1'b0;
+		else if (at_head && parked) held <= 1'b1;
+	end
+	wire [7:0]  mon_data;
+	wire [15:0] park_s;
+	ss_m6809_park u_park (
+		.clk(clk), .reset(reset), .fallE(fallE),
+		.park_req(park_req), .parked(parked), .resume(resume),
+		.a(a), .rnw(rnw), .bs(bs), .ba(ba), .dout(cpu_do), .game_nmi_n(nmi_hold == 2'd0),
+		.nmi_park_n(nmi_park_n), .sel_mon(sel_mon), .mon_data(mon_data), .at_head(at_head),
+		.ss_wr(ss_wr && ss_a == 12'h947), .ss_wdata(ss_wdata), .ss_rdata(park_s));
 	mc6809is #(.ILLEGAL_INSTRUCTIONS("GHOST")) u_cpu (
 		.CLK(clk), .fallE_en(fallE), .fallQ_en(fallQ),
-		.D(cpu_di), .DOut(cpu_do), .ADDR(a), .RnW(rnw), .BS(), .BA(),
-		.nIRQ(~ptm_out[0]), .nFIRQ(1'b1), .nNMI(nmi_hold == 2'd0),
+		.D(cpu_di), .DOut(cpu_do), .ADDR(a), .RnW(rnw), .BS(bs), .BA(ba),
+		.nIRQ(~ptm_out[0]), .nFIRQ(1'b1), .nNMI((nmi_hold == 2'd0) & nmi_park_n),
 		.AVMA(), .BUSY(), .LIC(), .nHALT(1'b1), .nRESET(~reset), .nDMABREQ(1'b1), .RegData());
 	assign dbg_pc_addr = a;
 	assign dbg_wr = fallE && !rnw;
@@ -104,9 +156,12 @@ module gn_sound (
 	// RAM
 	reg  [7:0] ram [0:2047];
 	reg  [7:0] ram_q;
+	wire [10:0] ram_a  = ss_act ? ss_a[10:0] : a[10:0];
+	wire        ram_we = ss_act ? (ss_wr && ss_a[11] == 1'b0) : (fallE && !rnw && sel_ram);
+	wire [7:0]  ram_d  = ss_act ? ss_wdata[7:0] : cpu_do;
 	always @(posedge clk) begin
-		if (fallE && !rnw && sel_ram) ram[a[10:0]] <= cpu_do;
-		ram_q <= ram[a[10:0]];
+		if (ram_we) ram[ram_a] <= ram_d;
+		ram_q <= ram[ram_a];
 	end
 
 	// latch and NMI (MAME: generic_latch_8, pulse_input_line(NMI)); the pulse
@@ -117,6 +172,8 @@ module gn_sound (
 		else begin
 			if (cmd_we) begin latch <= cmd; nmi_hold <= 2'd2; dbg_nmi <= dbg_nmi + 32'd1; end
 			else if (ce_e && nmi_hold != 2'd0) nmi_hold <= nmi_hold - 2'd1;
+			if (ss_wr && ss_a == 12'h940) latch <= ss_wdata[7:0];
+			if (ss_wr && ss_a == 12'h941) nmi_hold <= ss_wdata[1:0];
 			if (fallE && rnw && sel_latch) dbg_latch_reads <= dbg_latch_reads + 32'd1;
 		end
 	end
@@ -126,7 +183,9 @@ module gn_sound (
 	gn_ptm6840 u_ptm (
 		.clk(clk), .reset(reset), .ce_e(ce_e), .cs(sel_ptm),
 		.wr(fallE && !rnw), .rd(fallE && rnw), .addr(a[2:0]), .din(cpu_do), .dout(ptm_do),
-		.out(ptm_out), .irq_n(ptm_irq_n));
+		.out(ptm_out), .irq_n(ptm_irq_n),
+		.ss_idx(ss_a[3:0]), .ss_wr(ss_wr && ss_a[11:4] == 8'h93), .ss_wdata(ss_wdata), .ss_rdata(ptm_ss));
+	wire [15:0] ptm_ss;
 	reg ptm_o1_d;
 	always @(posedge clk) begin
 		ptm_o1_d <= ptm_out[0];
@@ -140,11 +199,91 @@ module gn_sound (
 	// chip writes: one clock at falling E
 	reg       opl_wr, opl_a0, psg_wr, psg_a0;
 	reg [7:0] wdata;
+	reg       rp_opl, rp_psg, rp_a0, rp_go;     // a replay write this clock
+	reg [7:0] rp_d;
 	always @(posedge clk) begin
 		opl_wr <= 1'b0; psg_wr <= 1'b0;
 		if (fallE && !rnw && (sel_opl || sel_psg)) begin
 			opl_wr <= sel_opl; psg_wr <= sel_psg; opl_a0 <= a[0]; psg_a0 <= a[0]; wdata <= cpu_do;
+		end else if (rp_go) begin
+			opl_wr <= rp_opl; psg_wr <= rp_psg; opl_a0 <= rp_a0; psg_a0 <= rp_a0; wdata <= rp_d;
 		end
+	end
+
+	// ---------------------------------------------------------------- register shadows
+	// captured at the chips' own write edge from the CPU (never from a replay)
+	reg  [7:0] opl_sh [0:255];
+	reg  [7:0] ym_sh [0:15];
+	reg  [7:0] opl_asel, ym_asel;
+	reg  [7:0] opl_sh_q;
+	reg  [7:0] rp_idx;
+	wire       cap = (opl_wr || psg_wr) && !replaying;
+	wire [7:0] osh_a  = ss_act ? ss_a[7:0] : replaying ? rp_idx : opl_asel;
+	wire       osh_we = ss_act ? (ss_wr && ss_a[11:8] == 4'h8) : (cap && opl_wr && opl_a0);
+	wire [7:0] osh_d  = ss_act ? ss_wdata[7:0] : wdata;
+	always @(posedge clk) begin
+		if (osh_we) opl_sh[osh_a] <= osh_d;
+		opl_sh_q <= opl_sh[osh_a];
+	end
+	always @(posedge clk) begin
+		if (reset) begin opl_asel <= 8'd0; ym_asel <= 8'd0; end
+		else begin
+			if (cap && opl_wr && !opl_a0) opl_asel <= wdata;
+			if (cap && psg_wr && !psg_a0) ym_asel <= wdata;
+			if (cap && psg_wr && psg_a0 && ym_asel[7:4] == 4'd0) ym_sh[ym_asel[3:0]] <= wdata;
+			if (ss_wr && ss_a[11:4] == 8'h92) ym_sh[ss_a[3:0]] <= ss_wdata[7:0];
+			if (ss_wr && ss_a == 12'h945) opl_asel <= ss_wdata[7:0];
+			if (ss_wr && ss_a == 12'h946) ym_asel <= ss_wdata[7:0];
+		end
+	end
+
+	// ---------------------------------------------------------------- replay
+	// YM2149: address r, data, for r = 0..15, then its address register; the
+	// Y8950 (FM part): the same for r = 0..255, then its address register.
+	// 128 chip clocks between writes: jtopl applies an operator write as its
+	// slots pass (one rotation is 72 clocks).
+	localparam R_IDLE = 3'd0, R_YM = 3'd1, R_YMA = 3'd2, R_OPL = 3'd3, R_OPLA = 3'd4, R_DONE = 3'd5;
+	reg [2:0] rst_;
+	reg       rp_half;                 // 0: address write next, 1: data write
+	reg [7:0] rp_wait;
+	assign replaying = rst_ != R_IDLE && rst_ != R_DONE;
+	always @(posedge clk) begin
+		rp_go <= 1'b0;
+		if (reset || !ss_replay) begin
+			rst_ <= R_IDLE; ss_replay_done <= 1'b0; rp_half <= 1'b0; rp_idx <= 8'd0; rp_wait <= 8'd0;
+		end else case (rst_)
+			R_IDLE: begin rst_ <= R_YM; rp_idx <= 8'd0; rp_half <= 1'b0; rp_wait <= 8'd0; end
+			R_DONE: ss_replay_done <= 1'b1;
+			default: begin
+				if (rp_wait != 8'd0) begin if (rep_ce) rp_wait <= rp_wait - 8'd1; end
+				else begin
+					rp_go <= 1'b1; rp_wait <= 8'd128;
+					rp_opl <= (rst_ == R_OPL || rst_ == R_OPLA); rp_psg <= (rst_ == R_YM || rst_ == R_YMA);
+					case (rst_)
+						R_YM: begin
+							rp_a0 <= rp_half; rp_d <= rp_half ? ym_sh[rp_idx[3:0]] : rp_idx;
+							rp_half <= ~rp_half;
+							if (rp_half) begin
+								if (rp_idx == 8'd15) rst_ <= R_YMA;
+								rp_idx <= rp_idx + 8'd1;
+							end
+						end
+						R_YMA: begin rp_a0 <= 1'b0; rp_d <= ym_asel; rst_ <= R_OPL; rp_idx <= 8'd0; rp_half <= 1'b0; end
+						R_OPL: begin
+							// opl_sh_q is the shadow at rp_idx (read continuously)
+							rp_a0 <= rp_half; rp_d <= rp_half ? opl_sh_q : rp_idx;
+							rp_half <= ~rp_half;
+							if (rp_half) begin
+								if (rp_idx == 8'd255) rst_ <= R_OPLA;
+								rp_idx <= rp_idx + 8'd1;
+							end
+						end
+						R_OPLA: begin rp_a0 <= 1'b0; rp_d <= opl_asel; rst_ <= R_DONE; end
+						default: ;
+					endcase
+				end
+			end
+		endcase
 	end
 
 	// ---------------------------------------------------------------- YM2149
@@ -153,16 +292,19 @@ module gn_sound (
 	// default YM2149), MODE 0 = the YM's 5-bit volume table
 	wire [7:0] psg_a, psg_b, psg_c;
 	YM2149 u_psg (
-		.CLK(clk), .CE(ce_psg), .RESET(reset), .BDIR(psg_wr), .BC(psg_wr & ~psg_a0),
+		.CLK(clk), .CE(ce_ym), .RESET(reset), .BDIR(psg_wr), .BC(psg_wr & ~psg_a0),
 		.DI(wdata), .DO(), .CHANNEL_A(psg_a), .CHANNEL_B(psg_b), .CHANNEL_C(psg_c),
 		.SEL(1'b0), .MODE(1'b0), .ACTIVE(), .IOA_in(8'hFF), .IOA_out(), .IOB_in(8'hFF), .IOB_out());
 
 	// ---------------------------------------------------------------- Y8950
 	wire signed [15:0] opl_snd;
 	gn_y8950 u_opl (
-		.clk(clk), .reset(reset), .cen(ce_q4), .wr(opl_wr), .a0(opl_a0), .din(wdata),
+		.clk(clk), .reset(reset), .cen(ce_opl), .wr(opl_wr), .a0(opl_a0), .din(wdata),
 		.mem_req(adpcm_req), .mem_addr(adpcm_addr), .mem_ack(adpcm_ack), .mem_data(adpcm_data),
-		.snd(opl_snd), .snd_fm(), .snd_adpcm(), .sample());
+		.snd(opl_snd), .snd_fm(), .snd_adpcm(), .sample(),
+		.replay(replaying), .ss_ad_idx(ss_a[4:0]), .ss_ad_wr(ss_wr && ss_a[11:5] == 7'h48),
+		.ss_ad_wdata(ss_wdata), .ss_ad_rdata(adpcm_ss));
+	wire [15:0] adpcm_ss;
 	assign dbg_opl = opl_snd;
 
 	// ---------------------------------------------------------------- mix
@@ -200,10 +342,35 @@ module gn_sound (
 	// read mux: RAM and ROM data are registered from the address, which the
 	// 6809 holds for the whole cycle, so they are valid at falling E
 	always @(*) begin
-		if (sel_ram)        cpu_di = ram_q;
+		if (sel_mon)        cpu_di = mon_data;
+		else if (sel_ram)   cpu_di = ram_q;
 		else if (sel_ptm)   cpu_di = ptm_do;
 		else if (sel_latch) cpu_di = latch;
 		else if (sel_rom)   cpu_di = rom_data;
 		else                cpu_di = 8'h00;
+	end
+
+	// ---------------------------------------------------------------- state bus read
+	reg [11:0] ss_a_d;
+	reg [15:0] ss_q;
+	always @(posedge clk) begin
+		ss_a_d <= ss_a;
+		casez (ss_a_d)
+			12'b0???_????_????: ss_q <= {8'd0, ram_q};
+			12'h8??:            ss_q <= {8'd0, opl_sh_q};
+			12'h90?, 12'h91?:   ss_q <= adpcm_ss;
+			12'h92?:            ss_q <= {8'd0, ym_sh[ss_a_d[3:0]]};
+			12'h93?:            ss_q <= ptm_ss;
+			12'h940:            ss_q <= {8'd0, latch};
+			12'h941:            ss_q <= {14'd0, nmi_hold};
+			12'h942:            ss_q <= {8'd0, acc[23:16]};
+			12'h943:            ss_q <= acc[15:0];
+			12'h944:            ss_q <= {13'd0, ph, psg_div};
+			12'h945:            ss_q <= {8'd0, opl_asel};
+			12'h946:            ss_q <= {8'd0, ym_asel};
+			12'h947:            ss_q <= park_s;
+			default:            ss_q <= 16'h0000;
+		endcase
+		ss_rdata <= ss_q;
 	end
 endmodule

@@ -30,7 +30,13 @@ module gn_adpcmb (
 	input         [7:0]  mem_data,
 	output               flag_eos,
 	output reg signed [15:0] pcm,
-	output               busy           // a step is still being processed
+	output               busy,          // a step is still being processed
+	// savestate: the unit's whole state as 20 words (its clock is frozen
+	// while the engine reads or writes it; a load leaves it idle)
+	input         [4:0]  ss_idx,
+	input                ss_wr,
+	input        [15:0]  ss_wdata,
+	output reg   [15:0]  ss_rdata
 );
 	localparam [31:0] LATCH = 32'hFFFFFFFF;
 	localparam S_BRDY = 1, S_EOS = 0, S_PLAYING = 2;   // status bits (ymfm: EOS 0x01, BRDY 0x02, PLAYING 0x04)
@@ -177,6 +183,47 @@ module gn_adpcmb (
 			end
 			default: ph <= P_IDLE;
 			endcase
+			// savestate load (last, so it wins)
+			if (ss_wr) begin
+				ph <= P_IDLE; mem_req <= 1'b0;
+				case (ss_idx)
+					5'd0, 5'd1, 5'd2, 5'd3, 5'd4, 5'd5, 5'd6, 5'd7: begin
+						r[{ss_idx[3:0], 1'b0}] <= ss_wdata[15:8]; r[{ss_idx[3:0], 1'b1}] <= ss_wdata[7:0];
+					end
+					5'd8:  r[16] <= ss_wdata[15:8];
+					5'd9:  begin st <= ss_wdata[15:8]; nibbles <= ss_wdata[3:0]; end
+					5'd10: buffer[31:16] <= ss_wdata;
+					5'd11: buffer[15:0] <= ss_wdata;
+					5'd12: position <= ss_wdata;
+					5'd13: cur[31:16] <= ss_wdata;
+					5'd14: cur[15:0] <= ss_wdata;
+					5'd15: acc <= ss_wdata;
+					5'd16: out <= ss_wdata;
+					5'd17: prev <= ss_wdata;
+					5'd18: adstep <= ss_wdata;
+					5'd19: chop <= ss_wdata[0];
+					default: ;
+				endcase
+			end
 		end
+	end
+	always @(*) begin
+		case (ss_idx)
+			5'd0, 5'd1, 5'd2, 5'd3, 5'd4, 5'd5, 5'd6, 5'd7:
+			       ss_rdata = {r[{ss_idx[3:0], 1'b0}], r[{ss_idx[3:0], 1'b1}]};
+			5'd8:  ss_rdata = {r[16], 8'd0};
+			5'd9:  ss_rdata = {st, 4'd0, nibbles};
+			5'd10: ss_rdata = buffer[31:16];
+			5'd11: ss_rdata = buffer[15:0];
+			5'd12: ss_rdata = position;
+			5'd13: ss_rdata = cur[31:16];
+			5'd14: ss_rdata = cur[15:0];
+			5'd15: ss_rdata = acc;
+			5'd16: ss_rdata = out;
+			5'd17: ss_rdata = prev;
+			5'd18: ss_rdata = adstep;
+			5'd19: ss_rdata = {15'd0, chop};
+			default: ss_rdata = 16'h0000;
+		endcase
 	end
 endmodule

@@ -45,6 +45,13 @@ module ss_m68k_park #(
 
 	output reg  [2:0] ipl_park,     // OR into the core's IPL: 7 while requesting, else 0
 	output            sel_mon,      // this read is the overlay's (code, state registers, or the vector)
+	// MODIFIED (Arcade-GingaNin_MiSTer, GN-10): the monitor's read of RESUME
+	// is held (the core withholds DTACK while `stall`) until resume, so the
+	// CPU leaves the monitor a fixed number of clocks after the release instead
+	// of wherever its spin loop happened to be. Without it the game resumed a
+	// few cycles apart after a save and after a load, and a timing-sensitive
+	// game (this one, in play) diverged from there.
+	output            stall,
 	output reg [15:0] mon_data,
 
 	// state registers
@@ -88,6 +95,7 @@ module ss_m68k_park #(
 	wire sel_regs = sel_win &  a[8];
 	wire sel_vec7 = ovl_on & (a[23:2] == 22'h1F);   // 0x7C/0x7E: vector 31
 	assign sel_mon = rd & (sel_win | sel_vec7);
+	assign stall   = rd & sel_regs & (a[3:1] == 3'd5) & ~resume;
 
 	// monitor code, 26 words (unidasm-verified in sim/rtl/ss_m68k)
 	wire [15:0] mb_hi = {8'h00, MON_BASE[23:16]};

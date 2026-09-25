@@ -96,7 +96,9 @@ module hw_top (
 		.ce_pix(ce_pix), .hcount(hcount), .vcount(vcount), .hblank(hb), .vblank(vb), .hsync(hs), .vsync(vs),
 		.rgb(rgb), .snd(snd),
 		.dbg_addr(dbg_addr), .dbg_wr(dwr), .dbg_wdata(), .dbg_be(), .dbg_irq1(dbg_irq1), .dbg_iack1(dbg_iack1),
-		.dbg_spr_overruns(dbg_spr_overruns));
+		.dbg_spr_overruns(dbg_spr_overruns),
+		.ss_freeze(1'b0), .ss_resume(1'b0), .ss_active(1'b0), .ss_addr(20'd0), .ss_wr(1'b0), .ss_wdata(16'd0),
+		.ss_rdata(), .ss_frozen(), .ss_parked(), .ss_replay(1'b0), .ss_replay_done());
 
 	assign t_bg_req = bg_req;   assign t_bg_ack = bg_ack;   assign t_bg_addr = bg_addr;   assign t_bg_data = bg_data;
 	assign t_fg_req = fg_req;   assign t_fg_ack = fg_ack;   assign t_fg_addr = fg_addr;   assign t_fg_data = fg_data;

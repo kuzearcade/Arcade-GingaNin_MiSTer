@@ -36,7 +36,13 @@ module gn_ptm6840 (
 	input      [7:0] din,
 	output reg [7:0] dout,
 	output reg [2:0] out,          // O1..O3 pins
-	output           irq_n
+	output           irq_n,
+	// savestate: the whole timer state as 11 words (the clock is frozen
+	// while the engine reads or writes it)
+	input      [3:0] ss_idx,
+	input            ss_wr,
+	input     [15:0] ss_wdata,
+	output reg [15:0] ss_rdata
 );
 	reg  [7:0]  cr [0:2];
 	reg  [7:0]  msb_buf, lsb_read;
@@ -132,7 +138,41 @@ module gn_ptm6840 (
 			// reads: status, and the counter's MSB latching its LSB
 			if (cs && rd && (addr == 3'd2 || addr == 3'd4 || addr == 3'd6))
 				lsb_read <= cnt[(addr >> 1) - 1][7:0];
+			// savestate load (last, so it wins)
+			if (ss_wr) case (ss_idx)
+				4'd0: begin cr[0] <= ss_wdata[15:8]; cr[1] <= ss_wdata[7:0]; end
+				4'd1: begin cr[2] <= ss_wdata[15:8]; msb_buf <= ss_wdata[7:0]; end
+				4'd2: begin lsb_read <= ss_wdata[15:8]; pre <= ss_wdata[2:0]; end
+				4'd3: latch[0] <= ss_wdata;
+				4'd4: latch[1] <= ss_wdata;
+				4'd5: latch[2] <= ss_wdata;
+				4'd6: cnt[0][15:0] <= ss_wdata;
+				4'd7: cnt[1][15:0] <= ss_wdata;
+				4'd8: cnt[2][15:0] <= ss_wdata;
+				4'd9: begin
+					cnt[0][16] <= ss_wdata[14]; cnt[1][16] <= ss_wdata[13]; cnt[2][16] <= ss_wdata[12];
+					outp <= ss_wdata[11:9]; run <= ss_wdata[8:6]; fired <= ss_wdata[5:3]; status <= ss_wdata[2:0];
+				end
+				4'd10: out <= ss_wdata[2:0];
+				default: ;
+			endcase
 		end
+	end
+	always @(*) begin
+		case (ss_idx)
+			4'd0: ss_rdata = {cr[0], cr[1]};
+			4'd1: ss_rdata = {cr[2], msb_buf};
+			4'd2: ss_rdata = {lsb_read, 5'd0, pre};
+			4'd3: ss_rdata = latch[0];
+			4'd4: ss_rdata = latch[1];
+			4'd5: ss_rdata = latch[2];
+			4'd6: ss_rdata = cnt[0][15:0];
+			4'd7: ss_rdata = cnt[1][15:0];
+			4'd8: ss_rdata = cnt[2][15:0];
+			4'd9: ss_rdata = {1'b0, cnt[0][16], cnt[1][16], cnt[2][16], outp, run, fired, status};
+			4'd10: ss_rdata = {13'd0, out};
+			default: ss_rdata = 16'h0000;
+		endcase
 	end
 	always @(*) begin
 		case (addr)

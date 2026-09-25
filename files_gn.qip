@@ -28,6 +28,12 @@ set_global_assignment -name SYSTEMVERILOG_FILE rtl/gingan/gn_y8950.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/gingan/gn_adpcmb.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/gingan/gn_rom_hw.sv
 
+# Savestates
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/savestate/savestate.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/savestate/savestate_ui.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/savestate/ss_m68k_park.sv
+set_global_assignment -name SYSTEMVERILOG_FILE rtl/savestate/ss_m6809_park.sv
+
 # SDRAM controller and arbiter
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/sdram.sv
 set_global_assignment -name SYSTEMVERILOG_FILE rtl/sdram_req.sv

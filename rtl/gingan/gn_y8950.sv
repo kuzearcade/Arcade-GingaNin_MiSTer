@@ -29,7 +29,15 @@ module gn_y8950 (
 	output reg signed [15:0] snd,       // after the DAC round trip
 	output reg signed [15:0] snd_fm,    // FM part alone (debug / isolation)
 	output reg signed [15:0] snd_adpcm, // ADPCM part alone
-	output reg           sample         // one clock per output sample
+	output reg           sample,        // one clock per output sample
+	// savestate: `replay` sends writes to the FM part only (the register
+	// shadow is replayed after a load; the ADPCM unit's state is restored
+	// directly through its port instead, so a replayed 0x07 cannot restart it)
+	input                replay,
+	input         [4:0]  ss_ad_idx,
+	input                ss_ad_wr,
+	input        [15:0]  ss_ad_wdata,
+	output       [15:0]  ss_ad_rdata
 );
 	// ---------------------------------------------------------------- FM
 	wire signed [15:0] fm;
@@ -58,7 +66,7 @@ module gn_y8950 (
 		if (reset) begin areg <= 8'd0; pw <= 1'b0; end
 		else begin
 			if (wr && !a0) areg <= din;
-			if (wr && a0 && m[5]) begin
+			if (wr && a0 && m[5] && !replay) begin
 				pw <= 1'b1; preg <= m[4:0];
 				pdat <= (areg == 8'h08) ? ((din & 8'h0F) | 8'h80) : din;
 			end else if (pw && !ad_busy && !ad_step) pw <= 1'b0;
@@ -68,7 +76,8 @@ module gn_y8950 (
 		.clk(clk), .reset(reset), .step(ad_step),
 		.wr(pw && !ad_busy && !ad_step), .wreg(preg), .wdata(pdat),
 		.mem_req(mem_req), .mem_addr(mem_addr), .mem_ack(mem_ack), .mem_data(mem_data),
-		.flag_eos(), .pcm(ad_pcm), .busy(ad_busy));
+		.flag_eos(), .pcm(ad_pcm), .busy(ad_busy),
+		.ss_idx(ss_ad_idx), .ss_wr(ss_ad_wr), .ss_wdata(ss_ad_wdata), .ss_rdata(ss_ad_rdata));
 
 	// ---------------------------------------------------------------- output
 	// y8950::generate: clock FM and ADPCM, FM out, + ADPCM, round trip
@@ -97,7 +106,8 @@ module gn_y8950 (
 		fm_sample_d <= fm_sample;
 		if (reset) seq <= 2'd0;
 		else begin
-			if (fm_sample && !fm_sample_d) begin ad_step <= 1'b1; seq <= 2'd1; end
+			// (no ADPCM step during a replay: the unit's restored state must hold)
+			if (fm_sample && !fm_sample_d && !replay) begin ad_step <= 1'b1; seq <= 2'd1; end
 			else if (seq == 2'd1 && !ad_busy && !ad_step) seq <= 2'd2;
 			else if (seq == 2'd2) begin
 				// ad_pcm is registered from the new ADPCM state one clock later

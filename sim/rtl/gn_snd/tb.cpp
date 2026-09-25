@@ -66,9 +66,23 @@ int main(int argc, char **argv) {
 	};
 	for (int i = 0; i < 2000; i++) tick();         // reset over ~37 E cycles
 	t->reset = 0;
+	// GN_PARK=ms: at that time park the 6809 (ss_m6809_park), freeze the board's
+	// clock for 2 ms, resume; the command schedule is shifted by the frozen
+	// time, so the device write sequence must come out unchanged
+	t->ss_a = 0x947;                 // the state bus shows the park register S
+	double park_at = getenv("GN_PARK") ? atof(getenv("GN_PARK")) * 1e6 : -1, shift = 0, held_since = -1;
+	int pstate = 0;
 	for (;;) {
-		double ns = cyc * (1e9 / 48e6);
+		double ns = cyc * (1e9 / 48e6) - shift;
 		if (ns > end_ns) break;
+		if (park_at >= 0) {
+			double wall = cyc * (1e9 / 48e6);
+			if (pstate == 0 && ns >= park_at) { t->park_req = 1; pstate = 1; printf("park requested at %.3f ms\n", ns / 1e6); }
+			else if (pstate == 1 && t->parked) { t->hold = 1; held_since = wall; pstate = 2; printf("parked, S=%04X, held\n", t->ss_rdata); }
+			else if (pstate == 2 && wall - held_since > 2e6) { t->hold = 0; t->resume = 1; pstate = 3; }
+			else if (pstate == 3 && !t->parked) { t->resume = 0; t->park_req = 0; pstate = 4; printf("resumed after %.3f ms parked\n", (wall - held_since) / 1e6); }
+			if (pstate >= 1 && pstate <= 3) { tick(); shift += 1e9 / 48e6; continue; }
+		}
 		t->cmd_we = 0;
 		if (ci < cmds.size()) {
 			double due = cmds[ci].t;

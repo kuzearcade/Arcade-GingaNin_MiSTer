@@ -11,7 +11,8 @@
 //     and one 16-bit DSW word (<switches> bytes 0 and 1). Byte 2 bit 7
 //     unlocks the Autofire menu, as on MS1Z.
 //   * The raster is 400 x 250 at 6 MHz (60.000 Hz), lines 16-239 visible.
-//   * No savestates yet (docs/PLAN.md M5): gn_core has no park/replay port.
+//   * Savestates park the 6809 as well as the 68000 (ss_m6809_park) and
+//     replay the YM2149 and Y8950 register shadows after a load.
 //   * No Service key: the board has none (MAME maps none).
 module emu
 (
@@ -45,7 +46,9 @@ assign VIDEO_ARY = (!ar) ? (video_rotated ? 12'd4 : 12'd3) : 12'd0;
 
 `include "build_id.v"
 localparam CONF_STR = {
-	"GingaNin;;",
+	// Savestates: 4 slots of 0x80000 bytes at 0x3E000000; the image is
+	// 0x5950 16-bit words (gn_core's map).
+	"GingaNin;SS3E000000:80000;",
 	"-;",
 	"HBO[122:121],Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
 	"HBO[3:1],Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;",
@@ -76,21 +79,43 @@ localparam CONF_STR = {
 	"P1-;",
 	"dAP1R[30],Save Scores;",
 	"dAP1R[31],Reset Scores;",
-	// Each slot is hidden until the .mra's <rom index="5"> table supplies it
-	// (docs/PLAN.md M5 names them from the cheat database).
+	// One game per core, so the slots carry the game's own cheat names
+	// (Pugsy's ginganin.xml / ginganina.xml, identical addresses; the order is
+	// tools/gen_cheats_mra.py's SLOTS). Each slot is hidden until the .mra's
+	// <rom index="5"> table supplies it; the seventh is unused.
 	"P2,Cheats;",
 	"P2-;",
-	"h3P2O[32],Cheat 1,Off,On;",
-	"h4P2O[33],Cheat 2,Off,On;",
-	"h5P2O[34],Cheat 3,Off,On;",
-	"h6P2O[35],Cheat 4,Off,On;",
-	"h7P2O[36],Cheat 5,Off,On;",
-	"h8P2O[37],Cheat 6,Off,On;",
-	"h9P2O[38],Cheat 7,Off,On;",
+	"h3P2O[32],Infinite Time,Off,On;",
+	"h4P2O[33],Infinite Energy,Off,On;",
+	"h5P2O[34],Infinite Beam,Off,On;",
+	"h6P2O[35],Infinite Sword,Off,On;",
+	"h7P2O[36],P1 Infinite Lives,Off,On;",
+	"h8P2O[37],P2 Infinite Lives,Off,On;",
+	"P4,Savestates;",
+	"P4O[41:40],Slot,1,2,3,4;",
+	"P4-;",
+	"P4R[42],Save state (Alt+F1-F4);",
+	"P4R[43],Load state (F1-F4);",
 	"-;",
 	"R[0],Reset;",
 	// Positionally matched against the <buttons> list the .mra writes.
 	"J1,Button 1,Button 2,Button 3,Start,Coin;",
+	"I,",
+	"Slot=F1-F4|Save=+Alt,",
+	"Active Slot 1,",
+	"Active Slot 2,",
+	"Active Slot 3,",
+	"Active Slot 4,",
+	"State 1 saved,",
+	"State 2 saved,",
+	"State 3 saved,",
+	"State 4 saved,",
+	"State 1 loaded,",
+	"State 2 loaded,",
+	"State 3 loaded,",
+	"State 4 loaded,",
+	"Savestate failed,",
+	"Slot empty;",
 	"V,v",`BUILD_DATE
 };
 
@@ -128,6 +153,10 @@ hps_io #(.CONF_STR(CONF_STR)) hps_io
 	// [1] shows the Autofire options, from <switches> byte 2 bit 7;
 	// [0] hides Orientation under direct video.
 	.status_menumask({4'd0, direct_video, hs_enable, ch_avail, 1'b0, autofire_unlock, direct_video}),
+	.status_in({status[127:42], ss_slot, status[39:0]}),
+	.status_set(ss_status_update),
+	.info_req(ss_info_req),
+	.info(ss_info),
 
 	.joystick_0(joystick_0),
 	.joystick_1(joystick_1),
@@ -454,6 +483,45 @@ always @(posedge clk_sys) hs_a0_d <= hs_addr[0];
 assign hs_dout = hs_a0_d ? ram2_dout[7:0] : ram2_dout[15:8];
 
 // ------------------------------------------------------------------
+// Savestates (rtl/savestate): Alt+F1-F4 save, F1-F4 load, or the OSD.
+// ------------------------------------------------------------------
+wire  [1:0] ss_slot;
+wire  [7:0] ss_info;
+wire        ss_save, ss_load, ss_info_req, ss_status_update;
+wire        ss_busy, ss_done_ok, ss_done_fail, ss_was_load;
+wire  [1:0] ss_fail_code;
+wire        ss_freeze, ss_frozen, ss_parked, ss_resume, ss_active, ss_wr, ss_replay, ss_replay_done;
+wire [19:0] ss_addr;
+wire [15:0] ss_rdata, ss_wdata;
+wire        eng_we, eng_rd;
+wire        rot_we;
+wire [28:0] rot_addr;
+wire [63:0] rot_din;
+wire  [7:0] rot_be;
+wire [28:0] eng_addr;
+wire [63:0] eng_din;
+
+savestate_ui savestate_ui (
+	.clk(clk_sys), .ps2_key(ps2_key), .allow_ss(~reset),
+	.status_slot(status[41:40]), .OSD_saveload(status[43:42]),
+	.done_ok(ss_done_ok), .done_fail(ss_done_fail), .fail_code(ss_fail_code), .was_load(ss_was_load),
+	.ss_save(ss_save), .ss_load(ss_load), .ss_info_req(ss_info_req), .ss_info(ss_info),
+	.statusUpdate(ss_status_update), .selected_slot(ss_slot)
+);
+
+savestate #(.SS_WORDS(20'h5950), .DDR_BASE(29'h07C00000), .SLOT_STRIDE(29'h00010000), .RD_LAT(4)) savestate (
+	.clk(clk_sys), .reset(reset),
+	.save_req(ss_save), .load_req(ss_load), .slot(ss_slot), .vblank(vblank_core), .allow(~ioctl_download),
+	.ss_freeze(ss_freeze), .ss_frozen(ss_frozen), .ss_parked(ss_parked), .ss_resume(ss_resume), .ss_active(ss_active),
+	.ss_addr(ss_addr), .ss_rdata(ss_rdata), .ss_wr(ss_wr), .ss_rd(), .ss_ack(1'b0), .ss_wdata(ss_wdata),
+	.ss_replay(ss_replay), .ss_replay_done(ss_replay_done),
+	.busy(ss_busy), .done_ok(ss_done_ok), .done_fail(ss_done_fail), .fail_code(ss_fail_code), .was_load(ss_was_load),
+	.clk_ddr(CLK_VIDEO), .ddr_busy(DDRAM_BUSY), .rot_we(rot_we),
+	.ddr_we(eng_we), .ddr_rd(eng_rd), .ddr_addr(eng_addr), .ddr_din(eng_din),
+	.ddr_dout(DDRAM_DOUT), .ddr_dout_ready(DDRAM_DOUT_READY)
+);
+
+// ------------------------------------------------------------------
 // The board
 // ------------------------------------------------------------------
 wire [23:0] core_rgb;
@@ -469,7 +537,9 @@ gn_core core (
 	.clk(clk_sys),
 	// held in reset for the download and until the SDRAM controller is up
 	.reset(reset | ~sdram_ready),
-	.pause(status[29] | hs_pause | ch_pause),
+	// The savestate engine masks pause: both CPUs have to EXECUTE to reach
+	// their park monitors, so a paused core could never be saved.
+	.pause((status[29] | hs_pause | ch_pause) & ~ss_busy),
 	.flip_osd(status[17]),
 	.dl_we(dl_bram), .dl_addr(ioctl_addr[19:0]), .dl_data(ioctl_dout),
 	.bg_req(bg_req), .bg_addr(bg_addr), .bg_ack(bg_ack), .bg_data(bg_data),
@@ -483,7 +553,10 @@ gn_core core (
 	.hblank(), .vblank(), .hsync(), .vsync(),
 	.rgb(core_rgb),
 	.snd(snd),
-	.dbg_addr(), .dbg_wr(), .dbg_wdata(), .dbg_be(), .dbg_irq1(), .dbg_iack1(), .dbg_spr_overruns()
+	.dbg_addr(), .dbg_wr(), .dbg_wdata(), .dbg_be(), .dbg_irq1(), .dbg_iack1(), .dbg_spr_overruns(),
+	.ss_freeze(ss_freeze), .ss_resume(ss_resume), .ss_active(ss_active), .ss_addr(ss_addr),
+	.ss_wr(ss_wr), .ss_wdata(ss_wdata), .ss_rdata(ss_rdata), .ss_frozen(ss_frozen), .ss_parked(ss_parked),
+	.ss_replay(ss_replay), .ss_replay_done(ss_replay_done)
 );
 
 assign AUDIO_L = snd;
@@ -593,9 +666,17 @@ screen_rotate screen_rotate (
 	.rotate_ccw(rotate_ccw), .no_rotate(no_rotate), .flip(1'b0), .video_rotated(video_rotated),
 	.FB_EN(FB_EN), .FB_FORMAT(FB_FORMAT), .FB_WIDTH(FB_WIDTH), .FB_HEIGHT(FB_HEIGHT),
 	.FB_BASE(FB_BASE), .FB_STRIDE(FB_STRIDE), .FB_VBL(FB_VBL), .FB_LL(FB_LL),
-	.DDRAM_CLK(DDRAM_CLK), .DDRAM_BUSY(DDRAM_BUSY), .DDRAM_BURSTCNT(DDRAM_BURSTCNT), .DDRAM_ADDR(DDRAM_ADDR),
-	.DDRAM_DIN(DDRAM_DIN), .DDRAM_BE(DDRAM_BE), .DDRAM_WE(DDRAM_WE), .DDRAM_RD(DDRAM_RD)
+	.DDRAM_CLK(DDRAM_CLK), .DDRAM_BUSY(DDRAM_BUSY), .DDRAM_BURSTCNT(), .DDRAM_ADDR(rot_addr),
+	.DDRAM_DIN(rot_din), .DDRAM_BE(rot_be), .DDRAM_WE(rot_we), .DDRAM_RD()
 );
+// screen_rotate's write wins any cycle it appears on; the savestate engine
+// fills the gaps. Both run on CLK_VIDEO.
+assign DDRAM_BURSTCNT = 8'd1;
+assign DDRAM_ADDR     = rot_we ? rot_addr : eng_addr;
+assign DDRAM_DIN      = rot_we ? rot_din  : eng_din;
+assign DDRAM_BE       = rot_we ? rot_be   : 8'hFF;
+assign DDRAM_WE       = rot_we | eng_we;
+assign DDRAM_RD       = eng_rd;
 assign FB_FORCE_BLANK = 1'b0;
 
 reg [26:0] act_cnt;

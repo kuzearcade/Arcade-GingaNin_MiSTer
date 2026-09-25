@@ -355,3 +355,76 @@ error.
   autofire plain-fire alias. `tools/gen_gn_mra.py` now writes that list.
 - **Savestates** are not in this build: `gn_core` has no park/replay port
   yet (M5).
+
+## GN-10 — Savestates: both CPUs parked, the sound board frozen, the chips replayed (closed)
+
+The engine is NMKBP964's `savestate.sv` with a fixed read latency (RD_LAT 4:
+every source here is a BRAM or a register, so the VARLAT handshake the plan
+named is not needed). The image is 0x5950 words (map in `gn_core.sv`); 4
+slots of 0x80000 bytes at 0x3E000000; Alt+F1-F4 save, F1-F4 load.
+
+**Parking.**
+- The 68000 parks with `ss_m68k_park`: a level-7 interrupt into a monitor
+  overlay at 0x1E8000, unmapped here.
+- The 6809 parks with the new `ss_m6809_park`:
+  - an NMI whose vector fetch (0xFFFC, BS=1 BA=0) is substituted with a
+    19-byte monitor at 0x3800, unmapped on the sound board;
+  - the NMI stacks every register (E=1), so the monitor only keeps S;
+  - it is requested only after the 68000 has parked, and only when the
+    game's own NMI (the sound latch) is neither in progress nor outstanding,
+    so the park never swallows a sound command.
+- Unit test (`sim/rtl/gn_snd`, `GN_PARK=3000`): park at 3 s, hold 2 ms,
+  resume. S = 0x07F1 (in sound RAM), and the device write sequence over 6 s
+  is identical to the unparked run (8,701 writes). The monitor's entry and
+  exit shift later writes by at most 65 us, the same after a save as after a
+  load.
+
+**Freezing.** The raster keeps running: the engine saves at a vblank edge
+and releases at one. The sound board's clock (6809 E, PTM, chips) stops from
+the moment both CPUs are parked until the release. The PTM, the NMI hold and
+the clock accumulator are therefore saved and restored exactly, and the
+sound board resumes at the same phase after a save as after a load.
+
+**Sound state.**
+- PTM: all timer state through a port (11 words).
+- ADPCM unit: its whole state through a port (20 words).
+- YM2149 and Y8950: register shadows captured at the chips' write edge from
+  the CPU, replayed after a load on a clock of their own:
+  - 128 chip clocks between writes, since jtopl applies an operator write as
+    its slots pass;
+  - the Y8950's replay goes to the FM part only, so a replayed 0x07 cannot
+    restart the ADPCM unit, and the unit does not step during the replay.
+
+  FM envelope phases are approximate after a load, as on MS1BCD's YM2151.
+- The palette-written flags (GN-1) are in the image, so a load keeps MAME's
+  default colours on entries the game never wrote.
+
+**Gate** (SS-13's three-save diff, `make ss` in `sim/rtl/gn_frames`):
+save slot 0; save slot 1 60 frames after the resume; load slot 0; save
+slot 2 60 frames after that resume. Slots 1 and 2 are one state reached two
+ways.
+- Attract, save at frame 300: **0 words differ; 59 of 59 pictures after
+  the resumes identical.**
+- Scripted play, save at frame 900: **open**.
+  - The harness replays `gn_play.lua`'s inputs from the loaded frame, and
+    the input words match frame for frame after both resumes.
+  - The first picture after each resume is identical. The second differs
+    in one sprite's area, and the game diverges from there.
+  - A save one frame after each resume shows the main board's state
+    identical. The sound board is 3 E cycles apart: the PTM counter and the
+    clock accumulator.
+  - Two fixes are in: the 68000's RESUME read is held (no DTACK) until the
+    release, and the sound clock stops at the 6809's loop head, so both
+    leave their monitors on a fixed clock. They did not change the result.
+    The investigation continues.
+
+**Board:** Alt+F1 wrote `Ginga Ninkyouden (set 1)_1.ss`, 45,736 bytes (8 +
+0x5950 x 2). F1, 15 s later, brought the same scene back:
+- after a save during the static roster, the post-load shots are
+  pixel-identical to the post-save ones;
+- during the moving demo, the stage timer after the load read 988, 960,
+  945, 933 against 987, 968, 944, 932 after the save (screenshot timing is
+  not frame-exact).
+
+The first build had slot 2 on F5, as the siblings do: their F2 is a Service
+key. This board has none, so `savestate_ui.sv` is back on F1-F4.

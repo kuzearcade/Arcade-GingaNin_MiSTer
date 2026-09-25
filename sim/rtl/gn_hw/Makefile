@@ -2,12 +2,12 @@
 #   make && ./obj_dir/Vhw_top IMAGE_DIR FRAMES
 RTL := ../../../rtl
 TP  := $(RTL)/third_party
-SRCS := $(wildcard $(RTL)/gingan/*.sv) $(RTL)/sdram.sv $(RTL)/sdram_arb.sv $(RTL)/sdram_req.sv ../../models/sdram_model.sv \
+SRCS := $(wildcard $(RTL)/gingan/*.sv) $(wildcard $(RTL)/savestate/ss_*.sv) $(RTL)/sdram.sv $(RTL)/sdram_arb.sv $(RTL)/sdram_req.sv ../../models/sdram_model.sv \
         $(wildcard $(TP)/jtopl/*.v) $(TP)/ym2149/ym2149_zx.sv $(TP)/mc6809/mc6809is.v \
         $(TP)/fx68k/fx68k.sv $(TP)/fx68k/fx68kAlu.sv $(TP)/fx68k/uaddrPla.sv
 VFLAGS := -Wno-fatal -Wno-WIDTH -Wno-PINCONNECTEMPTY -Wno-UNOPTFLAT -Wno-CASEINCOMPLETE -Wno-TIMESCALEMOD -Wno-LATCH \
           -Wno-MULTIDRIVEN -Wno-BLKANDNBLK -Wno-COMBDLY -Wno-CASEOVERLAP -Wno-IMPLICIT -Wno-SELRANGE -Wno-UNSIGNED
-INCS := -y $(RTL)/gingan -y $(RTL) -y ../../models -y $(TP)/jtopl $(TP)/ym2149/ym2149_zx.sv $(TP)/mc6809/mc6809is.v \
+INCS := -y $(RTL)/gingan -y $(RTL)/savestate -y $(RTL) -y ../../models -y $(TP)/jtopl $(TP)/ym2149/ym2149_zx.sv $(TP)/mc6809/mc6809is.v \
         $(TP)/fx68k/fx68k.sv $(TP)/fx68k/fx68kAlu.sv $(TP)/fx68k/uaddrPla.sv
 all: obj_dir/Vhw_top microrom.mem nanorom.mem
 microrom.mem nanorom.mem:
