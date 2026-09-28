@@ -37,7 +37,7 @@ measurement. `docs/provenance.md` says where every file came from.
 - **savestates:** the SS-13 three-save gate passes in attract and in play,
   0 words different (GN-10).
 - **board:** the attract matches MAME's frames on the board. Savestates,
-  high scores, cheats, flip, pause, autofire and both sets work (GN-9, GN-11).
+  high scores, cheats, flip, pause and both sets work (GN-9, GN-11).
   20,574 / 41,910 ALMs, 428 / 553 M10K, timing met.
 
 ## Supported games
@@ -53,10 +53,10 @@ measurement. `docs/provenance.md` says where every file came from.
   combined with the Flip Screen DIP), CRT Adjust.
 - DIP switches from the `.mra`, Pause, High Scores (MAME's `hiscore.dat`).
 - Six cheats named for the game (Pugsy's cheat database).
-- Autofire, hidden unless the `.mra`'s third `<switches>` byte sets bit 7.
 - Four savestate slots: Alt+F1-F4 saves, F1-F4 loads.
-- MAME's keyboard map: arrows, Left Ctrl, Left Alt, 5 and 6 (coins), 1 and 2
-  (starts); player 2 on R/F/D/G, A and S.
+- Two buttons, Attack and Jump, as the game's. MAME's keyboard map: arrows,
+  Left Ctrl (Attack), Left Alt (Jump), 5 and 6 (coins), 1 and 2 (starts);
+  player 2 on R/F/D/G, A and S.
 
 ## Building
 

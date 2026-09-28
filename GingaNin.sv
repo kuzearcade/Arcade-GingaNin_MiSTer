@@ -2,14 +2,14 @@
 // 1987; ginganin and ginganina).
 //
 // Derived from Arcade-JalecoMS1Z_MiSTer's MS1Z.sv (docs/provenance.md). The
-// OSD, keyboard map, autofire, high scores, cheats, CRT Adjust, orientation,
+// OSD, keyboard map, high scores, cheats, CRT Adjust, orientation,
 // the download/reset sequencing and the video chain are MS1Z's. What differs:
 //
 //   * The board: a 68000 at 6 MHz, a 6809 at 3.58 MHz with a YM2149 and a
 //     Y8950 (rtl/gingan). Mono audio.
 //   * One 16-bit input word (MAME's P1_P2: both players, coins and starts)
-//     and one 16-bit DSW word (<switches> bytes 0 and 1). Byte 2 bit 7
-//     unlocks the Autofire menu, as on MS1Z.
+//     and one 16-bit DSW word (<switches> bytes 0 and 1). No autofire: MS1Z's
+//     is left out, as nothing this core runs is a shooter.
 //   * The raster is 400 x 250 at 6 MHz (60.000 Hz), lines 16-239 visible.
 //   * Savestates park the 6809 as well as the 68000 (ss_m6809_park) and
 //     replay the YM2149 and Y8950 register shadows after a load.
@@ -64,12 +64,6 @@ localparam CONF_STR = {
 	"P3O[78:74],CRT V-Shift,0,+1,+2,+3,+4,+5,+6,+7,+8,+9,+10,+11,+12,+13,+14,+15,-16,-15,-14,-13,-12,-11,-10,-9,-8,-7,-6,-5,-4,-3,-2,-1;",
 	"P3O[107:104],CRT V-Size,0,+1,+2,+3,+4,-4,-3,-2,-1;",
 	"P3O[108],CRT V-Size Mode,PVM,Cabinet;",
-	// Autofire on button 1, clocked by the game's own vblank. While a player
-	// has it on, that player's button 3 is a plain button 1 (the game has only
-	// two buttons). Hidden (h1) unless the .mra's third <switches> byte sets
-	// bit 7.
-	"h1O[12:10],P1 Autofire,Off,10Hz,12Hz,15Hz,20Hz,30Hz;",
-	"h1O[15:13],P2 Autofire,Off,10Hz,12Hz,15Hz,20Hz,30Hz;",
 	"-;",
 	"DIP;",
 	"-;",
@@ -150,9 +144,8 @@ hps_io #(.CONF_STR(CONF_STR)) hps_io
 	// [11] hides Aspect ratio and Scandoubler Fx under direct video;
 	// [10] greys out Save/Reset Scores while High Scores is Off;
 	// [9:3] hide the cheat slots the loaded .mra has no cheat for;
-	// [1] shows the Autofire options, from <switches> byte 2 bit 7;
 	// [0] hides Orientation under direct video.
-	.status_menumask({4'd0, direct_video, hs_enable, ch_avail, 1'b0, autofire_unlock, direct_video}),
+	.status_menumask({4'd0, direct_video, hs_enable, ch_avail, 2'b00, direct_video}),
 	.status_in({status[127:42], ss_slot, status[39:0]}),
 	.status_set(ss_status_update),
 	.info_req(ss_info_req),
@@ -241,8 +234,7 @@ end
 
 // ------------------------------------------------------------------
 // The .mra <switches> block, ioctl index 254. Bytes 0 and 1 are the low and
-// high bytes of MAME's DSW word at 070002. Byte 2 is not a DIP: bit 7
-// unlocks the Autofire menu.
+// high bytes of MAME's DSW word at 070002.
 // ------------------------------------------------------------------
 reg [7:0] dip_sw [0:7];
 integer dip_i;
@@ -251,15 +243,10 @@ always @(posedge clk_sys) begin
 	if (ioctl_download && ioctl_wr && (ioctl_index == 16'd254) && !ioctl_addr[24:3])
 		dip_sw[ioctl_addr[2:0]] <= ioctl_dout;
 end
-reg sw_byte2_seen = 1'b0;
-always @(posedge clk_sys)
-	if (ioctl_download && ioctl_wr && (ioctl_index == 16'd254) && ioctl_addr[24:0] == 25'd2)
-		sw_byte2_seen <= 1'b1;
-wire autofire_unlock = sw_byte2_seen & dip_sw[2][7];
 
 // ------------------------------------------------------------------
 // Keyboard: MAME's default bindings, always live, ORed with the pads.
-//   P1: arrows, Left Ctrl = B1, Left Alt = B2, Space = B3 (autofire alias)
+//   P1: arrows, Left Ctrl = B1, Left Alt = B2, Space = B3 (unused: the game has two buttons)
 //   P2: R/F/D/G, A = B1, S = B2, Q = B3
 //   Coin 1 = 5, Coin 2 = 6, Start 1/2 = 1/2
 // ------------------------------------------------------------------
@@ -295,39 +282,13 @@ always @(posedge clk_sys) begin
 end
 
 // ------------------------------------------------------------------
-// Autofire (MS1Z's): the pattern advances once per game frame and restarts
-// on each press. With it on, button 1 is (held & pattern) | button 3.
+// The pads and the keyboard, ORed.
 // ------------------------------------------------------------------
 wire        vblank_core;
 wire  [6:0] p1_raw = joystick_0[6:0] | kb_p1;
 wire  [6:0] p2_raw = joystick_1[6:0] | kb_p2;
-reg  vbl_d = 1'b0;
-wire frame_tick = vblank_core & ~vbl_d;
-always @(posedge clk_sys) vbl_d <= vblank_core;
-
-function automatic [3:0] af_on(input [2:0] m);
-	case (m) 3'd1: af_on = 4'd3; 3'd2: af_on = 4'd2; 3'd3: af_on = 4'd2; 3'd4: af_on = 4'd1; 3'd5: af_on = 4'd1; default: af_on = 4'd0; endcase
-endfunction
-function automatic [3:0] af_len(input [2:0] m);
-	case (m) 3'd1: af_len = 4'd6; 3'd2: af_len = 4'd5; 3'd3: af_len = 4'd4; 3'd4: af_len = 4'd3; 3'd5: af_len = 4'd2; default: af_len = 4'd1; endcase
-endfunction
-
-reg  [3:0] af1_phase = 4'd0, af2_phase = 4'd0;
-reg        af1_held_d = 1'b0, af2_held_d = 1'b0;
-wire [2:0] af1_mode = status[12:10];
-wire [2:0] af2_mode = status[15:13];
-always @(posedge clk_sys) begin
-	af1_held_d <= p1_raw[4];
-	af2_held_d <= p2_raw[4];
-	if (p1_raw[4] & ~af1_held_d) af1_phase <= 4'd0;
-	else if (frame_tick) af1_phase <= (af1_phase + 4'd1 >= af_len(af1_mode)) ? 4'd0 : af1_phase + 4'd1;
-	if (p2_raw[4] & ~af2_held_d) af2_phase <= 4'd0;
-	else if (frame_tick) af2_phase <= (af2_phase + 4'd1 >= af_len(af2_mode)) ? 4'd0 : af2_phase + 4'd1;
-end
-wire af1_en = (af1_mode != 3'd0);
-wire af2_en = (af2_mode != 3'd0);
-wire p1_b1 = af1_en ? ((p1_raw[4] & (af1_phase < af_on(af1_mode))) | p1_raw[6]) : p1_raw[4];
-wire p2_b1 = af2_en ? ((p2_raw[4] & (af2_phase < af_on(af2_mode))) | p2_raw[6]) : p2_raw[4];
+wire p1_b1 = p1_raw[4];
+wire p2_b1 = p2_raw[4];
 
 // ------------------------------------------------------------------
 // Inputs: MAME's P1_P2 word at 070000, active low (ginganin.cpp):
@@ -562,7 +523,7 @@ gn_core core (
 assign AUDIO_L = snd;
 assign AUDIO_R = snd;
 
-// visible is rows 16..239 of 250; autofire and the cheats are the consumers
+// visible is rows 16..239 of 250; the cheats and savestates take it
 assign vblank_core = (vcount_core < 9'd16) | (vcount_core >= 9'd240);
 
 // ------------------------------------------------------------------

@@ -468,3 +468,17 @@ changed the last byte of the 3-byte top-score record. The vendored `hiscore`
 (NMK16's modified copy) validates each record's first and last byte against
 `hiscore.dat` before restoring, so it rightly discarded that dump. Patch only
 bytes inside a record.
+
+## GN-12 — No autofire; the .mra's buttons and a DIP name (closed)
+
+GitHub issue #1, and the owner's call that this core runs no shooter:
+- **Autofire is gone** (`GingaNin.sv`): MS1Z's menu, the `<switches>` byte-2
+  unlock and the pattern logic. Button 1 is the pad's button 1. J1 keeps its
+  third slot so Start and Coin stay on bits 7 and 8, but nothing reads it.
+  The `.mra`s have two `<switches>` bytes (the DSW word) and no flags byte.
+- **Buttons:** `Attack,Jump,-,Start,Coin`, defaults `B,A,-,Start,R` (MAME's
+  BUTTON1 and BUTTON2; the issue's defaults, with the "-" the unused slot
+  needs so Start and Coin keep their places).
+- **DIP name:** MAME's "Free Play & Invulnerability" did not fit the OSD
+  line beside its value; it is "Free Play & Invincible"
+  (`tools/gen_gn_mra.py` DIP_NAMES).
