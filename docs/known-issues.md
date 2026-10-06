@@ -505,3 +505,35 @@ its last byte, changed in the `.nvm` and the core reloaded: a savestate
 holds the changed record and not the saved one, and the next save keeps it.
 On the release (20260927) the last-byte change was reverted in both sets.
 Timing met at the default seed (setup +0.480 ns, hold +0.250 ns).
+
+## GN-14 — No sync on analog or direct video while the ROM loads (closed, measured)
+
+The core's raster (`gn_video`'s counters) is held at 0 by the game reset,
+which covers the ROM download, its 0.35 s settling tail and the wait for
+the SDRAM. `video_retime`'s read side, which makes the sync for analog and
+direct video, only started at the first frame edge from that raster, so on
+a fresh load there was no sync at all until the game ran: a CRT or a
+direct-video converter lost the picture, the menu's loading screen with it.
+HDMI was unaffected (the scaler makes its own timing).
+
+- `video_retime` (marked MODIFIED): the read side runs from configuration
+  (its counters initialised, `running` set), so sync is there from the
+  moment the FPGA is loaded. The first frame edge from the core's raster
+  re-places it once, as it always did at the first frame; that is the one
+  timing jump left, at the game's start, as before.
+- While the core is in reset (`reset | ~sdram_ready`, into `reset_w`, which
+  the module did not use), the picture is black: the two-line buffer then
+  holds stale lines.
+- Not done: running the raster through the reset as well, which would
+  remove that jump. It changes the frame phase the CPUs start in, which the
+  MAME comparisons start from.
+
+On the board, direct video on (the capture card cannot decode the 15 kHz
+picture, but shows one only when there is a signal): with the rbf loaded
+alone, the core waits in reset for the DIP timeout. The release (20261006)
+has no signal until the game starts, 9.4 s after the load; with this change
+there is a signal 4.2 s after the load, through the reset, then 1.8 s of
+re-lock as the game starts. Loaded through the `.mra`, the signal is back 3.5 s
+after the load (6.1 s on the release). With direct video off, HDMI is as
+before: the first frame at 4.0 s, the title and the attract the same. Timing
+met at the default seed (setup +0.418 ns, hold +0.161 ns).

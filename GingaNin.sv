@@ -564,7 +564,7 @@ video_retime #(
 	.M1_X0(10'd0), .M1_HT(10'd400), .M1_HS(10'd288), .M1_HW(10'd28), .M1_AW(10'd256), .M1_DIV(5'd16),
 	.LINE_CLKS(6400), .VTOTAL_P(250)
 ) video_retime (
-	.clk_w(clk_sys), .reset_w(reset), .ce_w(ce_pix_core),
+	.clk_w(clk_sys), .reset_w(reset | ~sdram_ready), .ce_w(ce_pix_core),
 	.hcount_w({1'b0, hcount_vid}), .vcount_w({1'b0, vcount_vid}), .rgb_w(core_rgb),
 	.mode1(1'b0), .tall240(1'b0),
 	.clk_r(clk_vid),
