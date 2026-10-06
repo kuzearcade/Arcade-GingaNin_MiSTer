@@ -149,7 +149,8 @@ def mra(setname):
 {switches_xml(setname)}
   <buttons names="{names}" default="{defaults}"/>
 
-  <rom index="0" zip="{'|'.join(s['zips'])}" md5="none">
+  <!-- address=: Main_MiSTer puts the image in DDR3 and the core replays it from there (GN-15) -->
+  <rom index="0" zip="{'|'.join(s['zips'])}" md5="none" address="0x30000000">
 {rom_xml(setname)}  </rom>
 </misterromdescription>
 """

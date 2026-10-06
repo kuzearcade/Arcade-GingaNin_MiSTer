@@ -29,7 +29,8 @@
 
   <buttons names="Attack,Jump,-,Start,Coin" default="B,A,-,Start,R"/>
 
-  <rom index="0" zip="ginganin.zip" md5="none">
+  <!-- address=: Main_MiSTer puts the image in DDR3 and the core replays it from there (GN-15) -->
+  <rom index="0" zip="ginganin.zip" md5="none" address="0x30000000">
     <!-- main: 0x20000 bytes at image 0x000000 -->
     <interleave output="16">
       <part crc="4a4e012f" name="gn_02.bin" map="01"/>

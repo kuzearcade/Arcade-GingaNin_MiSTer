@@ -9,6 +9,7 @@ Where every file came from. Pins are in `deps.lock`.
 | `sys/` | Template_MiSTer (via Arcade-JalecoMS1Z_MiSTer) | verbatim |
 | `rtl/sdram.sv`, `sdram_arb.sv`, `sdram_req.sv`, `crt_chain.sv`, `cheats.sv`, `pll.v` | Arcade-JalecoMS1Z_MiSTer | verbatim |
 | `rtl/video_retime.sv` | Arcade-NMKBP964_MiSTer | the parameterised vertical window; changed here (GN-14, marked MODIFIED): the read side runs from configuration, and `reset_w` blanks the picture |
+| `rtl/ddr_rom_load.sv` | written here (GN-15) | DDR3 ROM loading: the image replayed from DDR3 to the loaders |
 | `rtl/savestate/savestate.sv` | Arcade-NMKBP964_MiSTer | verbatim (NMKBP964's VARLAT mode; used here with a fixed latency) |
 | `rtl/savestate/ss_m68k_park.sv` | Arcade-NMKBP964_MiSTer | modified: `stall` holds the monitor's RESUME read until the release, so the 68000 leaves on a fixed clock (GN-10) |
 | `rtl/savestate/savestate_ui.sv` | Arcade-NMKBP964_MiSTer | modified: slot 2 on F2, not F5 (this board has no Service key; GN-10) |
