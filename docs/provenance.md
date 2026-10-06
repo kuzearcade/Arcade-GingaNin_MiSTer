@@ -13,7 +13,7 @@ Where every file came from. Pins are in `deps.lock`.
 | `rtl/savestate/ss_m68k_park.sv` | Arcade-NMKBP964_MiSTer | modified: `stall` holds the monitor's RESUME read until the release, so the 68000 leaves on a fixed clock (GN-10) |
 | `rtl/savestate/savestate_ui.sv` | Arcade-NMKBP964_MiSTer | modified: slot 2 on F2, not F5 (this board has no Service key; GN-10) |
 | `rtl/savestate/ss_m6809_park.sv` | new, after `ss_m68k_park` / MS1Z's `ss_z80_park` | GN-10 |
-| `rtl/third_party/fx68k`, `hiscore`, `crt_adjust` | Arcade-JalecoMS1Z_MiSTer (its pins) | verbatim |
+| `rtl/third_party/fx68k`, `hiscore`, `crt_adjust` | Arcade-JalecoMS1Z_MiSTer (its pins) | verbatim (`hiscore.v`: MS1Z's current copy, its dump validation removed, the note naming GN-13) |
 | `rtl/third_party/ym2149/ym2149_zx.sv` | MiSTer-devel/ZX-Spectrum_MISTer `rtl/ym2149.sv` | modified: the volume table is a `localparam` array instead of an initialised `wire` (Verilator); chosen over MSX_MiSTer's copy by Q5 (GN-5) |
 | `rtl/third_party/mc6809/mc6809is.v` | Arcade-TimePilot84_MiSTer (upstream cavnex/mc6809) | modified: power-up values on the NMI/IRQ/FIRQ latches and samples (GN-4); `LICENSE.md` from upstream (BSD) |
 | `rtl/third_party/jtopl/` | jotego/jtopl `hdl/` | verbatim, GPL-3.0 |

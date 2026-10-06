@@ -482,3 +482,26 @@ GitHub issue #1, and the owner's call that this core runs no shooter:
 - **DIP name:** MAME's "Free Play & Invulnerability" did not fit the OSD
   line beside its value; it is "Free Play & Invincible"
   (`tools/gen_gn_mra.py` DIP_NAMES).
+
+## GN-13 — High scores lost after a new record: the dump validation removed (closed, measured)
+
+The vendored `hiscore.v` carried NMK16's dump validation (NMK-33 there):
+before a restore, each record's first and last byte in the `.nvm` were
+compared with `hiscore.dat`'s start/end values, and the dump was discarded
+on a mismatch. Those values are `hiscore.dat`'s checks of the RAM against
+the default table, and here they are part of it: the third record is the
+HIGH-SCORE display (its end byte the score's low digits), and the first
+record ends on the "Y" of KITTY, the 4th name. A new top score, or any new
+entry in ranks 1-4, changed one, and the next load threw the saved table
+away (GN-11's "test error" was this check at work). NMK16 removed it
+(NMK-37); so does this, from the same file (MS1Z's copy, byte for byte but
+the note's issue numbers). Only the RAM's start and end bytes are checked
+before the restore, as upstream.
+
+On the board (`Arcade-GingaNin_20261006.rbf`, both sets, High Scores On),
+with a coin, a start and 15 s of play the OSD's save is MAME's RAM at the
+same point, byte for byte; a byte inside the largest record, and separately
+its last byte, changed in the `.nvm` and the core reloaded: a savestate
+holds the changed record and not the saved one, and the next save keeps it.
+On the release (20260927) the last-byte change was reverted in both sets.
+Timing met at the default seed (setup +0.480 ns, hold +0.250 ns).
