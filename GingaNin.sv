@@ -221,7 +221,20 @@ end
 wire hs_hold     = |hs_rst_cnt;
 wire hs_core_rst = (hs_rst_cnt > 29'd283000000);
 
-wire reset = RESET | status[0] | buttons[1] | ioctl_download | dl_settling | wait_switches | ~pll_locked | hs_core_rst;
+wire reset_req = RESET | status[0] | buttons[1] | ioctl_download | dl_settling | wait_switches | ~pll_locked | hs_core_rst;
+// (GN-16) The reset ends on video_retime's rel_tog, once a frame where its
+// read side expects the core's raster to begin: the raster then restarts in
+// phase with the sync that ran through the reset, so a CRT does not have to
+// re-lock when the game starts (a frame's delay at most).
+wire        vr_rel_tog;
+reg   [2:0] vr_rel_s = 3'b000;
+reg         vr_hold = 1'b1;
+always @(posedge clk_sys) begin
+	vr_rel_s <= {vr_rel_s[1:0], vr_rel_tog};
+	if (reset_req) vr_hold <= 1'b1;
+	else if (vr_rel_s[2] ^ vr_rel_s[1]) vr_hold <= 1'b0;
+end
+wire reset = reset_req | vr_hold;
 
 // The ROM loader's reset is power-on only: gn_rom_hw IS the download and has
 // to keep working through the window `reset` covers (SandScrp SS-15). Held
@@ -575,7 +588,7 @@ video_retime #(
 	.mode1(1'b0), .tall240(1'b0),
 	.clk_r(clk_vid),
 	.ce_r(rt_ce), .rgb_r(rt_rgb), .hs_r(rt_hs), .vs_r(rt_vs), .de_r(),
-	.hb_r(rt_hb), .vb_r(rt_vb), .vb_hs_r(rt_vb_hs)
+	.hb_r(rt_hb), .vb_r(rt_vb), .vb_hs_r(rt_vb_hs), .rel_tog(vr_rel_tog), .rel_lead(10'd0)
 );
 assign CLK_VIDEO = clk_vid;
 
