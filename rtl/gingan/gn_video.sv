@@ -41,6 +41,7 @@ module gn_video (
 	input      [1:0]  cpu_be,        // {upper, lower}
 	input      [15:0] cpu_din,
 	output reg [15:0] cpu_dout,      // valid 2 clocks after the address
+	output            txt_busy,      // the text snapshot is being taken: hold text accesses (GN-18)
 	output     [2:0]  layer_ctrl_dbg,
 	output     [15:0] vreg_out [0:7],
 	// ROM download into the BRAM regions (byte writes)
@@ -136,6 +137,30 @@ module gn_video (
 		endcase
 	end
 
+	// text snapshot (GN-18): MAME composes the frame once, at the start of
+	// vblank, and the game rewrites the whole text RAM from vblank on when a
+	// life starts, redrawing the HUD only after the beam has passed it. Drawn
+	// live, the HUD vanished for that frame. The text engine draws from this
+	// copy instead, taken from text RAM in the 1,024 clocks after line 240
+	// (MAME's frame_done); the 68000 waits on a text access meanwhile
+	// (txt_busy), so the copy is that instant's RAM exactly. Port B of
+	// txt_h/txt_l is the copy's alone.
+	reg [7:0] txd_h [0:1023], txd_l [0:1023];
+	reg       tc_run, tc_v;
+	reg [9:0] tc_a, tc_wa;
+	reg [7:0] tc_qh, tc_ql;
+	always @(posedge clk) begin
+		if (reset) tc_run <= 1'b0;
+		else if (vblank_start) begin tc_run <= 1'b1; tc_a <= 10'd0; end
+		else if (tc_run) begin tc_a <= tc_a + 10'd1; if (tc_a == 10'd1023) tc_run <= 1'b0; end
+		tc_v <= tc_run & ~reset; tc_wa <= tc_a;
+	end
+	always @(posedge clk) tc_qh <= txt_h[tc_a];
+	always @(posedge clk) tc_ql <= txt_l[tc_a];
+	always @(posedge clk) if (tc_v) txd_h[tc_wa] <= tc_qh;
+	always @(posedge clk) if (tc_v) txd_l[tc_wa] <= tc_ql;
+	assign txt_busy = tc_run;
+
 	// sprite scan copy: 256 x 64, one entry a clock ({y, x, code, attr}). One
 	// byte-lane array per byte, each with a plain write (MS1Z-6: a
 	// read-modify-write lane does not infer as RAM in Quartus 17).
@@ -230,7 +255,7 @@ module gn_video (
 	reg         tx_we;  reg [7:0] tx_x, tx_d;
 	reg  [9:0]  tx_map_a;
 	reg  [15:0] tx_map_q;
-	always @(posedge clk) tx_map_q <= {txt_h[tx_map_a], txt_l[tx_map_a]};
+	always @(posedge clk) tx_map_q <= {txd_h[tx_map_a], txd_l[tx_map_a]};
 	reg  [13:0] tx_rom_a;
 	reg  [31:0] tx_rom_q;
 	always @(posedge clk) tx_rom_q[31:24] <= txt_0[tx_rom_a[13:2]];

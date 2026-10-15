@@ -645,3 +645,63 @@ written, the game running on; four more saves and an F1, which went back to
 the saved point (11000 points to 5000) and play went on.
 
 Timing met at the default seed (setup +0.151 ns, hold +0.246 ns).
+
+## GN-18 — The top HUD blanked for one frame as each life started (closed, measured)
+
+Reported as the scores and text at the top of the screen flickering in and
+out during play. On the board (release v2026-10-15, defaults: no cheats, no
+high scores), 60 s of HDMI capture in play showed the top HUD (PLAYER-1,
+HIGH-SCORE, PLAYER-2 and the scores) missing for exactly one frame, twice,
+while the bottom HUD stayed. Both times it was the frame on which "PLAYER 1
+START" goes and play begins.
+
+**Cause.** As a life starts the game rewrites the whole text RAM. A CPU write
+log of scripted play (`MP_WRALL=1 MP_WRLOG`) shows it at frame 856: every
+word cleared from line 240 to about line 33, then the HUD written again at
+lines 30-55. The beam had drawn rows 2-3 (lines 16-31) in between, from the
+cleared RAM. The core's picture had the top HUD blank at frame 857 and every
+other frame from 853 to 859 had it. MAME's `screen_update` composes the frame
+once, at the start of vblank (`set_vblank_time(0)`), from the RAM as it then
+is, so it never shows the gap: MAME's text rows 2-3 change only with the
+score in 4,700 frames of play.
+
+Ruled out on the way: the layer enables (060008 is written once in play,
+FFFF, and is FFFF in every MAME state); the score's own redraw (written every
+frame with the same values, done by line 16 at the latest, and row 3 is drawn
+from line 22); the game's own blinking (none on the HUD, nor any palette
+change on its colours); the cheat walk and the high-score module (a few dozen
+clocks a frame, and only at the load and with the OSD open).
+
+**Fix.** The text engine draws from a copy of text RAM (`txd_h`/`txd_l` in
+`gn_video`, two M10K), taken in the 1,024 clocks after line 240, MAME's
+`frame_done`. Port B of the CPU's text RAM is the copy's alone. A 68000
+access to text RAM while the copy runs waits (`txt_busy`: `gn_main` holds
+the access and its DTACK count until the copy ends), so the copy is that
+instant's RAM exactly. In the write log the game's first text write after
+line 240 is at least three lines later, so it does not wait in practice.
+
+**What it costs.** Text the game changes while the picture is on screen now
+shows a frame later than MAME does. The game does that about every 8 frames
+on the bottom HUD row (screen rows 200-207, where MAME's picture already has
+the change). Scripted play, frames 600-1099, every frame compared with MAME's
+pictures at offsets -1 to +2: **270 of 500 exact** at some offset, against
+289 before; every frame lost is that row (and frame 665, one text row at
+the start of play). Exactness for the whole picture would need the frame
+composed at vblank, a frame buffer and a frame of lag; sprites already tear
+the same way (GN-7). Whether the PCB blanks the HUD as the live core did is
+not known. The attract figure in the README (841 of 1,508) was not measured
+again.
+
+**Gates.**
+- `video_state` (two frames rendered from each MAME state): 192 of 192 play
+  states (600-5375, every 25th) match MAME's picture.
+- Savestates (`make ss`): attract at 300 and play at 900, 0 words differ,
+  0 of 59 pictures after the resumes. The save freezes and releases at a
+  vblank edge, so the copy at the release is taken from the same RAM on both
+  paths.
+- `make lint` clean.
+
+**Board** (`6a5aafa7...`, as a separate test core): the same play test,
+90 s of HDMI capture over three life starts, no frame with the top HUD
+missing while the bottom one shows. Timing met at the default seed (setup
++0.314 ns, hold +0.214 ns); 20,782 / 41,910 ALMs, 430 / 553 M10K.

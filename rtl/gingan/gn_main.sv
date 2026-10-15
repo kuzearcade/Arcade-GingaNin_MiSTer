@@ -33,6 +33,7 @@ module gn_main (
 	output     [15:0] v_din,
 	input      [15:0] v_dout,
 	input             vblank_start,
+	input             txt_busy,      // gn_video's text snapshot: a text access waits (GN-18)
 	// inputs, active low (MAME's P1_P2 and DSW words)
 	input      [15:0] p1p2,
 	input      [15:0] dsw,
@@ -103,7 +104,8 @@ module gn_main (
 	wire [1:0] be = {~UDSn, ~LDSn};
 	wire rd = as_active & eRWn, wr = as_active & ~eRWn;
 
-	assign v_txt = as_active & ~iack & sel_txt;
+	wire txt_wait = sel_txt & txt_busy;
+	assign v_txt = as_active & ~iack & sel_txt & ~txt_busy;
 	assign v_spr = as_active & ~iack & sel_spr;
 	assign v_pal = as_active & ~iack & sel_pal;
 	assign v_reg = as_active & ~iack & sel_reg;
@@ -145,10 +147,11 @@ module gn_main (
 
 	// ---------------------------------------------------------------- bus cycle
 	// DTACK two clocks into a cycle: the BRAMs answer in one, the video port in
-	// two (a 6 MHz bus cycle is 32 clocks, so the wait is free).
+	// two (a 6 MHz bus cycle is 32 clocks, so the wait is free). A text access
+	// during gn_video's snapshot starts counting when it ends.
 	reg [1:0] cyc;
 	always @(posedge clk) begin
-		if (!as_active) cyc <= 2'd0;
+		if (!as_active || txt_wait) cyc <= 2'd0;
 		else if (cyc != 2'd3) cyc <= cyc + 2'd1;
 	end
 	wire ready = cyc >= 2'd2;

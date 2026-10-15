@@ -109,6 +109,7 @@ module gn_core (
 	wire [1:0]  v_be;
 	wire [15:0] v_din, v_dout;
 	wire        cmd_we;
+	wire        txt_busy;
 	assign dbg_wdata = v_din;
 	assign dbg_be = v_be;
 	wire [7:0]  cmd;
@@ -116,7 +117,7 @@ module gn_core (
 		.clk(clk), .reset(reset), .pause(pause),
 		.dl_we(dl_main), .dl_addr(dl_addr[16:0]), .dl_data(dl_data),
 		.v_txt(v_txt), .v_spr(v_spr), .v_pal(v_pal), .v_reg(v_reg), .v_fg(v_fg),
-		.v_addr(v_addr), .v_we(v_we), .v_be(v_be), .v_din(v_din), .v_dout(v_dout), .vblank_start(vblank_start),
+		.v_addr(v_addr), .v_we(v_we), .v_be(v_be), .v_din(v_din), .v_dout(v_dout), .vblank_start(vblank_start), .txt_busy(txt_busy),
 		.p1p2(p1p2), .dsw(dsw), .cmd_we(cmd_we), .cmd(cmd),
 		.ram2_sel(ss_active | ram2_sel), .ram2_addr(ss_active ? ss_addr[12:0] : ram2_addr),
 		.ram2_we(ss_active ? (ss_wr & ssr_ram) : ram2_we), .ram2_be(ss_active ? 2'b11 : ram2_be),
@@ -136,7 +137,7 @@ module gn_core (
 		.sel_fg(ss_active ? ssr_fg : v_fg),
 		.cpu_addr(ss_active ? (ssr_fg ? ss_fga : {3'd0, ss_addr[9:0]}) : v_addr),
 		.cpu_we(ss_active ? ss_wr : v_we), .cpu_be(ss_active ? 2'b11 : v_be),
-		.cpu_din(ss_active ? ss_wdata : v_din), .cpu_dout(v_dout),
+		.cpu_din(ss_active ? ss_wdata : v_din), .cpu_dout(v_dout), .txt_busy(txt_busy),
 		.layer_ctrl_dbg(), .vreg_out(),
 		.dl_we(dl_vid), .dl_bgmap(dl_addr >= 20'h34000), .dl_addr(dl_addr >= 20'h34000 ? 15'(dl_addr - 20'h34000) : 15'(dl_addr - 20'h30000)), .dl_data(dl_data),
 		.bg_req(bg_req), .bg_addr(bg_addr), .bg_ack(bg_ack), .bg_data(bg_data),
