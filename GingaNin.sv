@@ -438,8 +438,13 @@ hiscore #(
 wire [23:0] ch_addr;
 wire  [7:0] ch_din;
 wire        ch_write, ch_access, ch_pause;
+wire        ss_busy;
 wire  [6:0] ch_avail;
 
+// No poke walk starts while a savestate runs (GN-17): the engine masks pause so
+// the CPUs can reach their park monitors, and the back door takes main RAM's
+// port from a running CPU. A walk already under way when a save starts keeps
+// the CPU held (ch_pause is outside the ss_busy mask) until it ends.
 cheats ch (
 	.clk(clk_sys),
 	.reset(reset),
@@ -447,7 +452,7 @@ cheats ch (
 	.ioctl_addr(ioctl_addr), .ioctl_index(ioctl_index), .ioctl_dout(ioctl_dout),
 	.enable(status[38:32]),
 	.available(ch_avail),
-	.vblank(vblank_core),
+	.vblank(vblank_core & ~ss_busy),
 	.ram_addr(ch_addr), .ram_din(ch_din), .ram_write(ch_write),
 	.ram_access(ch_access), .ram_dout(hs_dout), .pause_cpu(ch_pause)
 );
@@ -468,7 +473,7 @@ assign hs_dout = hs_a0_d ? ram2_dout[7:0] : ram2_dout[15:8];
 wire  [1:0] ss_slot;
 wire  [7:0] ss_info;
 wire        ss_save, ss_load, ss_info_req, ss_status_update;
-wire        ss_busy, ss_done_ok, ss_done_fail, ss_was_load;
+wire        ss_done_ok, ss_done_fail, ss_was_load;
 wire  [1:0] ss_fail_code;
 wire        ss_freeze, ss_frozen, ss_parked, ss_resume, ss_active, ss_wr, ss_replay, ss_replay_done;
 wire [19:0] ss_addr;
@@ -519,7 +524,7 @@ gn_core core (
 	.reset(reset | ~sdram_ready),
 	// The savestate engine masks pause: both CPUs have to EXECUTE to reach
 	// their park monitors, so a paused core could never be saved.
-	.pause((status[29] | hs_pause | ch_pause) & ~ss_busy),
+	.pause(((status[29] | hs_pause) & ~ss_busy) | ch_pause),
 	.flip_osd(status[17]),
 	.dl_we(dl_bram), .dl_addr(ioctl_addr[19:0]), .dl_data(ioctl_dout),
 	.bg_req(bg_req), .bg_addr(bg_addr), .bg_ack(bg_ack), .bg_data(bg_data),
